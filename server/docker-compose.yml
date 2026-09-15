@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # Dedicated PostgreSQL Relational Database Service
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: safewatch-postgres-db
+    restart: always
+    environment:
+      POSTGRES_USER: safewatch_admin
+      POSTGRES_PASSWORD: safewatch_password_123
+      POSTGRES_DB: safewatch_hse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ../database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safewatch_admin -d safewatch_hse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # -------------------------------------------------------------
+  # Dedicated SafeWatch HSE Server Service
+  # -------------------------------------------------------------
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    container_name: safewatch-server
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://safewatch_admin:safewatch_password_123@postgres:5432/safewatch_hse
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: safewatch_admin
+      PGPASSWORD: safewatch_password_123
+      PGDATABASE: safewatch_hse
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local
