@@ -80,9 +80,49 @@ jobs:
             echo "No version file changes needed commit."
           fi
 
-          # Create and push git tag
-          git tag "$TAG" || true
-          git push origin "$TAG" --force || true
+          # Create and push git tag with retry mechanism
+          echo "Creating and verifying tag $TAG..."
+          git tag -f "$TAG"
+
+          echo "Pushing tag $TAG to origin with retries..."
+          PUSHED=false
+          for i in {1..5}; do
+            if git push origin "refs/tags/$TAG" --force; then
+              echo "Successfully pushed tag $TAG on attempt $i"
+              PUSHED=true
+              break
+            else
+              echo "Push failed on attempt $i, retrying in 3 seconds..."
+              sleep 3
+            fi
+          done
+
+          if [ "$PUSHED" != "true" ]; then
+            echo "Error: Failed to push tag $TAG after multiple attempts."
+            exit 1
+          fi
+
+          # Verify remote tag replication
+          echo "Verifying tag $TAG exists on remote repository..."
+          VERIFIED=false
+          for i in {1..10}; do
+            REMOTE_TAG=$(git ls-remote --tags origin "refs/tags/$TAG")
+            if [ -n "$REMOTE_TAG" ]; then
+              echo "Verified: Tag $TAG is available on remote repository."
+              VERIFIED=true
+              break
+            else
+              echo "Waiting for remote tag replication (attempt $i/10)..."
+              sleep 2
+            fi
+          done
+
+          if [ "$VERIFIED" != "true" ]; then
+            echo "Warning: Remote tag check did not return immediately, but tag push succeeded."
+          fi
+
+          # Propagation cooldown to ensure all GitHub replica nodes have the tag
+          sleep 3
 
           # Initialize GitHub Release directly (Zero storage quota usage!)
           echo "Initializing GitHub Release $TAG..."
@@ -105,7 +145,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ needs.prepare-version.outputs.tag_name }}
+
+      - name: Ensure Tag is Checked Out Locally
+        run: |
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          echo "Ensuring checkout of tag $TAG..."
+          git fetch origin tag "$TAG" --force || true
+          git checkout "$TAG" || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -200,7 +248,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ needs.prepare-version.outputs.tag_name }}
+
+      - name: Ensure Tag is Checked Out Locally
+        shell: bash
+        run: |
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          echo "Ensuring checkout of tag $TAG..."
+          git fetch origin tag "$TAG" --force || true
+          git checkout "$TAG" || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -261,7 +318,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ needs.prepare-version.outputs.tag_name }}
+
+      - name: Ensure Tag is Checked Out Locally
+        run: |
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          echo "Ensuring checkout of tag $TAG..."
+          git fetch origin tag "$TAG" --force || true
+          git checkout "$TAG" || true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
