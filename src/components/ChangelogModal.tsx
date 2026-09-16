@@ -23,14 +23,18 @@ const ChangelogModal: React.FC<ChangelogModalProps> = ({ isOpen, onClose, settin
         {/* Modal Header */}
         <div className="p-5 flex justify-between items-center text-white bg-linear-to-r from-indigo-700 to-indigo-900 relative overflow-hidden">
           <div className="absolute -right-6 -top-6 w-24 h-24 bg-indigo-500/10 rounded-full blur-lg"></div>
-          <div className="flex items-center gap-2.5 relative z-10">
-            <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+          <div className="flex items-center gap-3 relative z-10">
+            <img 
+              src="/icon.png" 
+              alt="SafeWatch" 
+              className="w-10 h-10 rounded-xl object-contain shadow-md border border-white/20 bg-slate-950/60 p-0.5 shrink-0" 
+            />
             <div>
               <h3 className="font-black text-sm md:text-base leading-tight">
                 {isFa ? 'آخرین تغییرات و ویژگی‌های جدید' : 'Latest Features & Changelog'}
               </h3>
               <p className="text-[10px] text-indigo-200 font-mono mt-0.5">
-                {isFa ? 'نسخه فعلی: v4.14.0' : 'Current Version: v4.14.0'}
+                {isFa ? 'نسخه فعلی: v4.15.0' : 'Current Version: v4.15.0'}
               </p>
             </div>
           </div>

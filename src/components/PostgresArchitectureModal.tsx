@@ -94,9 +94,11 @@ export function PostgresArchitectureModal({ isOpen, onClose }: PostgresArchitect
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-slate-900 px-6 py-4 text-white">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600/20 text-blue-400 border border-blue-500/30">
-              <Database className="h-5 w-5" />
-            </div>
+            <img 
+              src="/icon.png" 
+              alt="SafeWatch" 
+              className="w-10 h-10 rounded-xl object-contain shadow-md border border-blue-500/30 bg-slate-950/60 p-0.5" 
+            />
             <div>
               <h2 className="text-lg font-bold">مدیریت سرور، کلاینت و پایگاه داده PostgreSQL</h2>
               <p className="text-xs text-slate-400">معماری تفکیک‌شده سرور و دیتابیس مجزا SafeWatch HSE</p>

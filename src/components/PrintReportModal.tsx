@@ -4,6 +4,7 @@ import { X, Printer, Download, Calendar, Award, AlertTriangle, FileText, CheckCi
 import html2pdf from 'html2pdf.js';
 import { AppSettings, Violation, Reward, Employee } from '../types';
 import { TRANSLATIONS } from '../constants';
+import CompanyLogo from './CompanyLogo';
 
 interface PrintReportModalProps {
   isOpen: boolean;
@@ -541,9 +542,11 @@ const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   
                   {/* Right Header: Logo & Company */}
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center text-white shrink-0 font-extrabold text-sm border border-indigo-700">
-                      HSE
-                    </div>
+                    <CompanyLogo 
+                      src={settings.companyLogo} 
+                      alt={settings.companyName || 'HSE Logo'} 
+                      className="w-12 h-12 rounded-xl object-contain border border-slate-300 p-0.5 shadow-xs shrink-0 bg-white" 
+                    />
                     <div className="text-right">
                       <h1 className="text-sm font-black text-slate-900 leading-tight">
                         {settings.companyName || (isFa ? 'شرکت معدنی و صنعتی نمونه' : 'General Mining & Industrial Co.')}

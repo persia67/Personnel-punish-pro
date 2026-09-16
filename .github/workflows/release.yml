@@ -12,11 +12,12 @@ on:
 
 permissions:
   contents: write
+  actions: write
   packages: write
 
 jobs:
   # --------------------------------------------------------------------------
-  # 1. VERSIONING JOB: Analyzes commit history and automatically bumps version
+  # 1. VERSIONING JOB: Analyzes commit history, bumps version, and initiates Release
   # --------------------------------------------------------------------------
   prepare-version:
     name: Determine & Bump Version (Semantic Versioning)
@@ -33,6 +34,18 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Cleanup Old Actions Artifacts (Free Quota)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Purging old GitHub Actions artifacts to free storage quota..."
+          gh api --paginate -X GET "repos/${{ github.repository }}/actions/artifacts" --jq '.artifacts[]?.id' 2>/dev/null | head -n 100 | while read -r art_id; do
+            if [ -n "$art_id" ]; then
+              echo "Deleting obsolete artifact ID: $art_id"
+              gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$art_id" 2>/dev/null || true
+            fi
+          done || true
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -42,6 +55,7 @@ jobs:
         id: bump
         env:
           MANUAL_VERSION: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -70,19 +84,23 @@ jobs:
           git tag "$TAG" || true
           git push origin "$TAG" --force || true
 
-      - name: Upload Release Notes
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-notes
-          path: release-notes.md
+          # Initialize GitHub Release directly (Zero storage quota usage!)
+          echo "Initializing GitHub Release $TAG..."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "SafeWatch HSE v${NEW_VER}" --notes-file release-notes.md || true
+          else
+            gh release create "$TAG" --title "SafeWatch HSE v${NEW_VER}" --notes-file release-notes.md || true
+          fi
 
   # --------------------------------------------------------------------------
-  # 2. ANDROID JOB: Compiles and signs APK installer
+  # 2. ANDROID JOB: Compiles, signs APK, and uploads directly to GitHub Release
   # --------------------------------------------------------------------------
   build-android:
     name: Build Android APK Installer
     needs: prepare-version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -112,7 +130,6 @@ jobs:
           if grep -q '"build"' package.json; then
             npm run build || npx vite build || true
           fi
-          # Ensure dist directory exists
           mkdir -p dist
 
       - name: Verify or Add Android Platform
@@ -160,19 +177,25 @@ jobs:
           $BUILD_TOOLS_DIR/apksigner sign --ks release.keystore --ks-pass pass:safewatch123 --key-pass pass:safewatch123 --out "$APK_NAME" "$RAW_APK"
           $BUILD_TOOLS_DIR/apksigner verify "$APK_NAME" && echo "APK signed and verified successfully!"
 
-      - name: Upload Android Installer Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-installer
-          path: SafeWatch-v${{ needs.prepare-version.outputs.version }}-Android.apk
+      - name: Upload Android Installer Directly to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          VERSION="${{ needs.prepare-version.outputs.version }}"
+          APK_NAME="SafeWatch-v${VERSION}-Android.apk"
+          echo "Uploading $APK_NAME directly to GitHub Release $TAG (Bypassing Action artifact quota)..."
+          gh release upload "$TAG" "$APK_NAME" --clobber
 
   # --------------------------------------------------------------------------
-  # 3. WINDOWS JOB: Compiles Windows Desktop Installer (.msi / .exe)
+  # 3. WINDOWS JOB: Compiles Windows MSI and uploads directly to GitHub Release
   # --------------------------------------------------------------------------
   build-windows:
     name: Build Windows Desktop Installer (.msi)
     needs: prepare-version
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -205,36 +228,35 @@ jobs:
         run: |
           npx @tauri-apps/cli build || npm run tauri build
 
-      - name: Locate and Rename Windows Installer
-        shell: pwsh
+      - name: Locate, Rename, and Upload Windows Installer to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = "${{ needs.prepare-version.outputs.version }}"
-          $destName = "SafeWatch-v$version-Windows-Setup.msi"
+          VERSION="${{ needs.prepare-version.outputs.version }}"
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          DEST_NAME="SafeWatch-v${VERSION}-Windows-Setup.msi"
           
-          # Search for generated MSI or EXE bundle
-          $installer = Get-ChildItem -Path "src-tauri\target\release\bundle" -Recurse -Include *.msi,*.exe | Select-Object -First 1
-          if ($installer) {
-            Write-Host "Found Windows Installer at: $($installer.FullName)"
-            Copy-Item $installer.FullName -Destination ".\$destName"
-            Write-Host "Prepared $destName for release."
-          } else {
-            Write-Error "No Windows installer (.msi or .exe) found in Tauri release directory."
+          INSTALLER=$(find src-tauri/target/release/bundle -type f \( -name "*.msi" -o -name "*.exe" \) | head -n 1)
+          if [ -n "$INSTALLER" ]; then
+            echo "Found Windows installer: $INSTALLER"
+            cp "$INSTALLER" "$DEST_NAME"
+            echo "Uploading $DEST_NAME directly to GitHub Release $TAG (Bypassing Action artifact quota)..."
+            gh release upload "$TAG" "$DEST_NAME" --clobber
+          else
+            echo "Error: No Windows installer (.msi or .exe) found in Tauri release directory!"
             exit 1
-          }
-
-      - name: Upload Windows Installer Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: SafeWatch-v${{ needs.prepare-version.outputs.version }}-Windows-Setup.msi
+          fi
 
   # --------------------------------------------------------------------------
-  # 4. WEB JOB: Packages Standalone Web / PWA archive
+  # 4. WEB JOB: Packages Standalone Web archive directly to GitHub Release
   # --------------------------------------------------------------------------
   build-web:
     name: Package Web Distribution (PWA)
     needs: prepare-version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -253,72 +275,34 @@ jobs:
           npm run build || npx vite build || true
           mkdir -p dist
 
-      - name: Create Web Distribution Archive
-        run: |
-          VERSION="${{ needs.prepare-version.outputs.version }}"
-          zip -r "SafeWatch-v${VERSION}-Web-PWA.zip" dist package.json 2>/dev/null || zip -r "SafeWatch-v${VERSION}-Web-PWA.zip" . -x "*.git*" "node_modules/*" ".next/*" "target/*"
-
-      - name: Upload Web Archive
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-installer
-          path: SafeWatch-v${{ needs.prepare-version.outputs.version }}-Web-PWA.zip
-
-  # --------------------------------------------------------------------------
-  # 5. PUBLISH RELEASE JOB: Gathers all installers and publishes GitHub Release
-  # --------------------------------------------------------------------------
-  publish-release:
-    name: Publish GitHub Release with Installers
-    needs: [prepare-version, build-android, build-windows, build-web]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Download Version Release Notes
-        uses: actions/download-artifact@v4
-        with:
-          name: release-notes
-
-      - name: Download Android Installer
-        uses: actions/download-artifact@v4
-        with:
-          name: android-installer
-          path: release-assets
-
-      - name: Download Windows Installer
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-installer
-          path: release-assets
-
-      - name: Download Web Archive
-        uses: actions/download-artifact@v4
-        with:
-          name: web-installer
-          path: release-assets
-
-      - name: Publish GitHub Release
+      - name: Create and Upload Web Archive directly to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.prepare-version.outputs.version }}"
           TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          ZIP_NAME="SafeWatch-v${VERSION}-Web-PWA.zip"
 
-          echo "Publishing GitHub Release $TAG with installers:"
-          ls -la release-assets/
+          zip -r "$ZIP_NAME" dist package.json 2>/dev/null || zip -r "$ZIP_NAME" . -x "*.git*" "node_modules/*" ".next/*" "target/*"
+          echo "Uploading $ZIP_NAME directly to GitHub Release $TAG (Bypassing Action artifact quota)..."
+          gh release upload "$TAG" "$ZIP_NAME" --clobber
 
-          # Check if release already exists
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Updating notes and uploading installer assets..."
-            gh release edit "$TAG" --title "SafeWatch HSE v${VERSION}" --notes-file release-notes.md || true
-            gh release upload "$TAG" release-assets/* --clobber
-          else
-            echo "Creating new GitHub Release $TAG..."
-            gh release create "$TAG" release-assets/* \
-              --title "SafeWatch HSE v${VERSION}" \
-              --notes-file release-notes.md || \
-            gh release upload "$TAG" release-assets/* --clobber
-          fi
+  # --------------------------------------------------------------------------
+  # 5. FINALIZE RELEASE: Verifies assets on GitHub Release
+  # --------------------------------------------------------------------------
+  finalize-release:
+    name: Verify Completed Release
+    needs: [prepare-version, build-android, build-windows, build-web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: View Published Release Details
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.prepare-version.outputs.tag_name }}"
+          echo "=========================================================="
+          echo "Successfully published all multi-platform installers for: $TAG"
+          echo "=========================================================="
+          gh release view "$TAG"

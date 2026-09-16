@@ -6,6 +6,34 @@ const jpeg = require('jpeg-js');
 // Helper to load or generate a clean 1024x1024 PNG master icon buffer
 function getMasterPngBuffer() {
   const masterPngPath = path.join(__dirname, '../assets/icon-master.png');
+
+  // Prioritize newly generated modern HSE SafeWatch icon
+  const imgDir = path.join(__dirname, '../src/assets/images');
+  let jpgPath = null;
+  if (fs.existsSync(imgDir)) {
+    const files = fs.readdirSync(imgDir).filter(f => f.endsWith('.jpg') || f.endsWith('.png'));
+    const hseIcons = files.filter(f => f.includes('hse_safewatch_icon')).sort().reverse();
+    const appIcons = files.filter(f => f.includes('app_icon')).sort().reverse();
+    const targetFile = hseIcons[0] || appIcons[0];
+    if (targetFile) {
+      jpgPath = path.join(imgDir, targetFile);
+    }
+  }
+
+  if (jpgPath && fs.existsSync(jpgPath)) {
+    console.log(`[Icon Pipeline] Using master source image: ${jpgPath}`);
+    const jpegData = fs.readFileSync(jpgPath);
+    const rawData = jpeg.decode(jpegData, { useTolerant: true });
+    const png = new PNG({ width: rawData.width, height: rawData.height });
+    png.data = rawData.data;
+    const cleanPngBuf = PNG.sync.write(png);
+
+    fs.mkdirSync(path.dirname(masterPngPath), { recursive: true });
+    fs.writeFileSync(masterPngPath, cleanPngBuf);
+    console.log(`[Icon Pipeline] Generated clean master PNG from ${path.basename(jpgPath)} at ${masterPngPath}`);
+    return cleanPngBuf;
+  }
+
   if (fs.existsSync(masterPngPath)) {
     const buf = fs.readFileSync(masterPngPath);
     if (buf.length > 8 && buf.subarray(0, 4).toString('hex') === '89504e47') {
@@ -13,27 +41,7 @@ function getMasterPngBuffer() {
     }
   }
 
-  // Fallback to source JPEG image if PNG is missing or corrupted
-  const jpgCandidates = [
-    path.join(__dirname, '../src/assets/images/app_icon_master_1785575009595.jpg'),
-    path.join(__dirname, '../src/assets/images/app_icon_main_1785151968177.jpg')
-  ];
-
-  let jpgPath = jpgCandidates.find(p => fs.existsSync(p));
-  if (!jpgPath) {
-    throw new Error('No master image found to generate application icons!');
-  }
-
-  const jpegData = fs.readFileSync(jpgPath);
-  const rawData = jpeg.decode(jpegData, { useTolerant: true });
-  const png = new PNG({ width: rawData.width, height: rawData.height });
-  png.data = rawData.data;
-  const cleanPngBuf = PNG.sync.write(png);
-
-  fs.mkdirSync(path.dirname(masterPngPath), { recursive: true });
-  fs.writeFileSync(masterPngPath, cleanPngBuf);
-  console.log(`[Icon Pipeline] Regenerated clean master PNG at ${masterPngPath}`);
-  return cleanPngBuf;
+  throw new Error('No master image found to generate application icons!');
 }
 
 // Helper to create uncompressed 32bpp DIB header and data from PNG

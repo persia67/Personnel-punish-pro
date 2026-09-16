@@ -150,9 +150,11 @@ export const InitialSetupWizard: React.FC<InitialSetupWizardProps> = ({
         <div className="p-6 bg-linear-to-r from-indigo-900 via-indigo-950 to-slate-900 text-white relative">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-400">
-                <Sparkles className="w-5 h-5 animate-pulse text-amber-300" />
-              </div>
+              <img 
+                src="/icon.png" 
+                alt="SafeWatch HSE" 
+                className="w-11 h-11 rounded-2xl object-contain shadow-lg border border-indigo-400/40 bg-slate-950/60 p-1 shrink-0" 
+              />
               <div>
                 <h3 className="font-black text-base sm:text-lg">
                   {isFa ? 'ویزارد راه‌اندازی و انتخاب حالت استقرار' : 'Deployment Architecture Setup Wizard'}
