@@ -16,8 +16,11 @@ export async function GET() {
       const stat = fs.statSync(filePath);
       return {
         fileName: file,
+        filename: file,
         size: stat.size,
+        sizeBytes: stat.size,
         modifiedAt: stat.mtime.toISOString(),
+        createdAt: stat.mtime.toISOString(),
       };
     });
     return NextResponse.json({ success: true, backups: backupsList, totalCount: backupsList.length });
@@ -29,6 +32,25 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
+
+    // If restore action requested
+    if (body.action === 'restore' && body.filename) {
+      const safeFilename = path.basename(body.filename);
+      const filePath = path.join(BACKUPS_DIR, safeFilename);
+      if (!fs.existsSync(filePath)) {
+        return NextResponse.json({ success: false, message: 'فایل پشتیبان مورد نظر یافت نشد.' }, { status: 404 });
+      }
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const backupData = JSON.parse(raw);
+      const restored = await DatabaseAdapter.syncState(backupData);
+      return NextResponse.json({
+        success: true,
+        message: 'پایگاه داده با موفقیت از پشتیبان بازیابی گردید.',
+        restoredState: restored,
+      });
+    }
+
+    // Default: create backup
     const note = body.note || 'پشتیبان تهیه‌شده از دیتابیس PostgreSQL';
     const db = await DatabaseAdapter.getFullState();
     const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
@@ -55,8 +77,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'نسخه پشتیبان از داده‌های PostgreSQL با موفقیت ایجاد گردید.',
-      backup: { fileName, size: stat.size },
+      backup: { fileName, filename: fileName, size: stat.size, sizeBytes: stat.size, createdAt: new Date().toISOString() },
     });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, message: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const url = new URL(req.url);
+    const filename = url.searchParams.get('filename');
+    if (!filename) {
+      return NextResponse.json({ success: false, message: 'نام فایل پشتیبان مشخص نشده است.' }, { status: 400 });
+    }
+    const safeFilename = path.basename(filename);
+    const filePath = path.join(BACKUPS_DIR, safeFilename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    return NextResponse.json({ success: true, message: 'فایل پشتیبان با موفقیت حذف گردید.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, message: err.message }, { status: 500 });
   }
