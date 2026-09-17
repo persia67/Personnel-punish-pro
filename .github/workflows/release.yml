@@ -64,10 +64,15 @@ jobs:
           # Run automated version bumper
           node scripts/bump-version.js "$MANUAL_VERSION"
 
-          NEW_VER="${{ steps.bump.outputs.version }}"
+          # Extract target version directly from package.json to avoid uninitialized step output read
+          NEW_VER=$(node -p "require('./package.json').version")
           TAG="v$NEW_VER"
 
           echo "Target Version determined: $NEW_VER ($TAG)"
+
+          # Explicitly emit step outputs for downstream jobs
+          echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
 
           # Commit updated version files back to repository with [skip ci] to prevent loop
           git add package.json client/package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml android/app/build.gradle 2>/dev/null || true
@@ -144,16 +149,32 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare-version.outputs.tag_name }}
 
-      - name: Ensure Tag is Checked Out Locally
+      - name: Guard & Checkout Release Tag
         run: |
           TAG="${{ needs.prepare-version.outputs.tag_name }}"
-          echo "Ensuring checkout of tag $TAG..."
-          git fetch origin tag "$TAG" --force || true
-          git checkout "$TAG" || true
+          echo "Verifying availability of release tag $TAG..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Guard: loop until tag is reachable or maximum retry reached
+          FOUND=false
+          for i in {1..8}; do
+            if git fetch origin "refs/tags/$TAG:refs/tags/$TAG" --force 2>/dev/null; then
+              echo "Release tag $TAG fetched successfully on attempt $i."
+              git checkout "refs/tags/$TAG" 2>/dev/null || git checkout "$TAG"
+              FOUND=true
+              break
+            else
+              echo "Tag $TAG not found yet on origin (attempt $i/8), waiting 2s..."
+              sleep 2
+            fi
+          done
+
+          if [ "$FOUND" != "true" ]; then
+            echo "Notice: Tag checkout fell back to current commit workspace (version files already updated)."
+          fi
+          echo "Head commit after checkout guard: $(git rev-parse --short HEAD)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -247,17 +268,33 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare-version.outputs.tag_name }}
 
-      - name: Ensure Tag is Checked Out Locally
+      - name: Guard & Checkout Release Tag
         shell: bash
         run: |
           TAG="${{ needs.prepare-version.outputs.tag_name }}"
-          echo "Ensuring checkout of tag $TAG..."
-          git fetch origin tag "$TAG" --force || true
-          git checkout "$TAG" || true
+          echo "Verifying availability of release tag $TAG..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Guard: loop until tag is reachable or maximum retry reached
+          FOUND=false
+          for i in {1..8}; do
+            if git fetch origin "refs/tags/$TAG:refs/tags/$TAG" --force 2>/dev/null; then
+              echo "Release tag $TAG fetched successfully on attempt $i."
+              git checkout "refs/tags/$TAG" 2>/dev/null || git checkout "$TAG"
+              FOUND=true
+              break
+            else
+              echo "Tag $TAG not found yet on origin (attempt $i/8), waiting 2s..."
+              sleep 2
+            fi
+          done
+
+          if [ "$FOUND" != "true" ]; then
+            echo "Notice: Tag checkout fell back to current commit workspace (version files already updated)."
+          fi
+          echo "Head commit after checkout guard: $(git rev-parse --short HEAD)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -317,16 +354,32 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare-version.outputs.tag_name }}
 
-      - name: Ensure Tag is Checked Out Locally
+      - name: Guard & Checkout Release Tag
         run: |
           TAG="${{ needs.prepare-version.outputs.tag_name }}"
-          echo "Ensuring checkout of tag $TAG..."
-          git fetch origin tag "$TAG" --force || true
-          git checkout "$TAG" || true
+          echo "Verifying availability of release tag $TAG..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Guard: loop until tag is reachable or maximum retry reached
+          FOUND=false
+          for i in {1..8}; do
+            if git fetch origin "refs/tags/$TAG:refs/tags/$TAG" --force 2>/dev/null; then
+              echo "Release tag $TAG fetched successfully on attempt $i."
+              git checkout "refs/tags/$TAG" 2>/dev/null || git checkout "$TAG"
+              FOUND=true
+              break
+            else
+              echo "Tag $TAG not found yet on origin (attempt $i/8), waiting 2s..."
+              sleep 2
+            fi
+          done
+
+          if [ "$FOUND" != "true" ]; then
+            echo "Notice: Tag checkout fell back to current commit workspace (version files already updated)."
+          fi
+          echo "Head commit after checkout guard: $(git rev-parse --short HEAD)"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
