@@ -185,6 +185,22 @@ function updatePlatformFiles(newVersion, versionCode) {
     }
   }
 
+  // A2. root package-lock.json (if present)
+  const lockPkgPath = path.join(process.cwd(), 'package-lock.json');
+  if (fs.existsSync(lockPkgPath)) {
+    try {
+      const lock = JSON.parse(fs.readFileSync(lockPkgPath, 'utf8'));
+      lock.version = newVersion;
+      if (lock.packages && lock.packages['']) {
+        lock.packages[''].version = newVersion;
+      }
+      fs.writeFileSync(lockPkgPath, JSON.stringify(lock, null, 2) + '\n');
+      updatedFiles.push('package-lock.json');
+    } catch (e) {
+      console.error('Error updating package-lock.json:', e.message);
+    }
+  }
+
   // B. client/package.json (if present)
   const clientPkgPath = path.join(process.cwd(), 'client', 'package.json');
   if (fs.existsSync(clientPkgPath)) {
