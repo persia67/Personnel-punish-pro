@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "intelligent-monitoring-system",
-  "version": "4.15.14",
+  "version": "4.15.15",
   "identifier": "com.intelligent.monitoring.system",
   "build": {
     "frontendDist": "../dist",
