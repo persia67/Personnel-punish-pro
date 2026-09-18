@@ -1,6 +1,6 @@
 {
   "name": "safewatch-hse-client",
-  "version": "4.15.19",
+  "version": "4.15.20",
   "description": "SafeWatch HSE Management System - Standalone Frontend Client",
   "type": "module",
   "scripts": {
