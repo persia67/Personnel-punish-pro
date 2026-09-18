@@ -22,6 +22,15 @@ allprojects {
         google()
         mavenCentral()
     }
+    // Align all kotlin-stdlib artifacts to avoid Duplicate class errors
+    // (kotlin-stdlib 1.8+ embeds jdk7/jdk8 extensions; mixed versions conflict).
+    configurations.configureEach {
+        resolutionStrategy {
+            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+        }
+    }
 }
 
 task clean(type: Delete) {
