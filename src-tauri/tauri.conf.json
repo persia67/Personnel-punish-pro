@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run generate:icons && npm run build"
+    "beforeBuildCommand": "npm run generate:icons && npm run build:vite"
   },
   "app": {
     "windows": [

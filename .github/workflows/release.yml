@@ -196,10 +196,10 @@ jobs:
 
       - name: Build Web Distribution
         run: |
-          if grep -q '"build"' package.json; then
-            npm run build || npx vite build || true
+          if [ -f "scripts/generate-icons.js" ]; then
+            node scripts/generate-icons.js
           fi
-          mkdir -p dist
+          npm run build:vite
 
       - name: Verify or Add Android Platform
         run: |
@@ -312,15 +312,14 @@ jobs:
         shell: bash
         run: |
           if [ -f "scripts/generate-icons.js" ]; then
-            node scripts/generate-icons.js || true
+            node scripts/generate-icons.js
           fi
-          npm run build || npx vite build || true
-          mkdir -p dist
+          npm run build:vite
 
       - name: Build Tauri Windows Installer
         shell: bash
         run: |
-          npx @tauri-apps/cli build || npm run tauri build
+          npm run tauri -- build
 
       - name: Locate, Rename, and Upload Windows Installer to GitHub Release
         shell: bash
@@ -390,8 +389,10 @@ jobs:
       - name: Install Dependencies & Build
         run: |
           npm ci || npm install
-          npm run build || npx vite build || true
-          mkdir -p dist
+          if [ -f "scripts/generate-icons.js" ]; then
+            node scripts/generate-icons.js
+          fi
+          npm run build:vite
 
       - name: Create and Upload Web Archive directly to GitHub Release
         env:

@@ -11,6 +11,7 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {
+      '@': path.resolve(__dirname, './'),
       'react': path.resolve(__dirname, 'node_modules/react'),
       'react-dom': path.resolve(__dirname, 'node_modules/react-dom')
     }
@@ -20,6 +21,8 @@ export default defineConfig({
     include: ['react', 'react-dom', 'lucide-react', 'framer-motion', 'recharts']
   },
   server: {
+    port: 3000,
+    host: '0.0.0.0',
     watch: {
       ignored: ['**/android/**', '**/release/**', '**/src-tauri/**', '**/dist/**']
     }
