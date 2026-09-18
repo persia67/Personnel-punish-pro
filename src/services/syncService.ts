@@ -41,37 +41,44 @@ export function setLocalDeploymentMode(mode: DeploymentMode): void {
 }
 
 export function getServerUrl(): string {
-  if (typeof window === 'undefined') return 'http://localhost:3000';
+  if (typeof window === 'undefined') return '';
   try {
     const custom = localStorage.getItem(STORAGE_KEY_SERVER_URL);
     if (custom && custom.trim()) {
-      return custom.trim().replace(/\/$/, '');
+      const trimmed = custom.trim().replace(/\/$/, '');
+      // If current protocol is https and custom is http (mixed content), only use if same host or explicit
+      if (window.location.protocol === 'https:' && trimmed.startsWith('http://') && !trimmed.includes('localhost')) {
+        return window.location.origin;
+      }
+      return trimmed;
     }
     return window.location.origin;
   } catch {
-    return 'http://localhost:3000';
+    return '';
   }
 }
 
 export async function fetchCentralData(): Promise<any> {
   const base = getServerUrl();
   try {
-    const res = await fetch(`${base}/api/db`, {
+    const targetUrl = base ? `${base}/api/db` : '/api/db';
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const res = await fetch(targetUrl, {
       headers: { 'Accept': 'application/json' },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
+
     if (!res.ok) {
-      let errorMsg = res.statusText;
-      try {
-        const errorJson = await res.json();
-        if (errorJson?.error || errorJson?.message || errorJson?.details) {
-          errorMsg = errorJson.error || errorJson.message || errorJson.details;
-        }
-      } catch {}
-      throw new Error(`Failed to fetch database: ${errorMsg || `HTTP ${res.status}`}`);
+      console.warn(`[Sync] Central server returned status ${res.status}`);
+      return null;
     }
-    return res.json();
+    return await res.json();
   } catch (err: any) {
-    throw new Error(err.message || 'Failed to fetch database');
+    console.warn('[Sync] Central server not reachable, using local storage cache:', err?.message || err);
+    return null;
   }
 }
 
