@@ -268,6 +268,12 @@ function runIconPipeline() {
     { dir: 'drawable-land-xxxhdpi', w: 1920, h: 1280 }
   ];
 
+  const defaultSplashBuf = createSplashPNG(masterPngBuf, 720, 1280);
+  fs.mkdirSync(path.join(__dirname, '../assets'), { recursive: true });
+  fs.mkdirSync(path.join(__dirname, '../resources'), { recursive: true });
+  fs.writeFileSync(path.join(__dirname, '../assets/splash.png'), defaultSplashBuf);
+  fs.writeFileSync(path.join(__dirname, '../resources/splash.png'), defaultSplashBuf);
+
   androidSplashes.forEach(s => {
     const splashBuf = createSplashPNG(masterPngBuf, s.w, s.h);
     const targetDir = path.join(__dirname, `../android/app/src/main/res/${s.dir}`);
