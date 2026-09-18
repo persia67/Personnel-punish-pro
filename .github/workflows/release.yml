@@ -190,6 +190,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
+          # Prevent a corrupted generated-JAR cache from being restored or saved.
           cache-disabled: true
 
       - name: Install NPM Dependencies
@@ -213,46 +214,59 @@ jobs:
         run: |
           npx cap sync android || true
 
-      - name: Clean Environment & Compile Signed APK
+      - name: Clean Gradle Caches & Compile Signed APK
         run: |
-          # Completely purge any legacy or corrupted Gradle cache directory
-          rm -rf ~/.gradle/caches 2>/dev/null || true
-          rm -rf ~/.gradle/daemon 2>/dev/null || true
+          set -e
 
-          # Verify or repair gradle-wrapper.jar
-          if [ ! -f "android/gradle/wrapper/gradle-wrapper.jar" ] || ! unzip -t android/gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
-            echo "Downloading healthy gradle-wrapper.jar..."
-            mkdir -p android/gradle/wrapper
-            curl -sSL "https://raw.githubusercontent.com/gradle/gradle/v8.2.1/gradle/wrapper/gradle-wrapper.jar" -o android/gradle/wrapper/gradle-wrapper.jar
-          fi
+          # Remove generated/instrumented JARs, including the failing jars-9 entry.
+          rm -rf ~/.gradle/caches/jars-* || true
+          rm -rf ~/.gradle/caches/transforms-* || true
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle || true
+          rm -f ~/.gradle/caches/modules-2/modules-2.lock || true
 
           chmod +x android/gradlew
           cd android
-          
-          # Clean build outputs and run assemble
-          ./gradlew clean --no-daemon || true
-          ./gradlew assembleRelease --no-daemon --stacktrace || ./gradlew assembleDebug --no-daemon --stacktrace
+
+          ./gradlew --stop || true
+          ./gradlew clean assembleRelease \
+            --no-daemon \
+            --no-build-cache \
+            --refresh-dependencies \
+            --stacktrace
+
           cd ..
 
           RAW_APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
           echo "Found compiled APK: $RAW_APK"
 
           if [ -z "$RAW_APK" ]; then
-            echo "Error: Android build did not produce an APK!" && exit 1
+            echo "Error: Android build did not produce an APK!"
+            exit 1
           fi
 
           # Create release signing keystore
-          keytool -genkeypair -v -keystore release.keystore -alias safewatch -keyalg RSA -keysize 2048 -validity 10000 -storepass safewatch123 -keypass safewatch123 -dname "CN=SafeWatch, OU=HSE, O=SafeWatch, L=Tehran, ST=Tehran, C=IR" -noprompt || true
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias safewatch \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass safewatch123 \
+            -keypass safewatch123 \
+            -dname "CN=SafeWatch, OU=HSE, O=SafeWatch, L=Unknown, ST=Unknown, C=US"
 
-          # Locate apksigner
-          BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* | tail -n 1)
-          echo "Signing APK using build-tools: $BUILD_TOOLS_DIR"
-
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* | tail -n 1)
           VERSION="${{ needs.prepare-version.outputs.version }}"
           APK_NAME="SafeWatch-v${VERSION}-Android.apk"
 
-          $BUILD_TOOLS_DIR/apksigner sign --ks release.keystore --ks-pass pass:safewatch123 --key-pass pass:safewatch123 --out "$APK_NAME" "$RAW_APK"
-          $BUILD_TOOLS_DIR/apksigner verify "$APK_NAME" && echo "APK signed and verified successfully!"
+          "$BUILD_TOOLS_DIR/apksigner" sign \
+            --ks release.keystore \
+            --ks-pass pass:safewatch123 \
+            --key-pass pass:safewatch123 \
+            --out "$APK_NAME" \
+            "$RAW_APK"
+
+          "$BUILD_TOOLS_DIR/apksigner" verify "$APK_NAME"
 
       - name: Upload Android Installer Directly to GitHub Release
         env:
