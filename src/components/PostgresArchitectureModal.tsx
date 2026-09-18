@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Database, Server, Laptop, RefreshCw, CheckCircle2, AlertTriangle, Play, Terminal, Layers, Copy, Check, ShieldCheck, HardDrive } from 'lucide-react';
+import { APP_VERSION } from '../constants';
 
 interface PostgresArchitectureModalProps {
   isOpen: boolean;
@@ -487,7 +488,7 @@ export function PostgresArchitectureModal({ isOpen, onClose }: PostgresArchitect
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-6 py-3 text-xs text-slate-500">
-          <span>SafeWatch HSE Architecture Manager v4.15.0</span>
+          <span>SafeWatch HSE Architecture Manager v{APP_VERSION}</span>
           <button
             onClick={onClose}
             className="rounded-xl bg-slate-900 px-4 py-2 font-bold text-white hover:bg-slate-800 transition-colors"

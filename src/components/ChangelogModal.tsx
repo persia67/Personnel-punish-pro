@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Sparkles, Phone, Layers, RefreshCw, Milestone, Shield, Server } from 'lucide-react';
 import { AppSettings } from '../types';
+import { APP_VERSION } from '../constants';
 
 interface ChangelogModalProps {
   isOpen: boolean;
@@ -34,7 +35,7 @@ const ChangelogModal: React.FC<ChangelogModalProps> = ({ isOpen, onClose, settin
                 {isFa ? 'آخرین تغییرات و ویژگی‌های جدید' : 'Latest Features & Changelog'}
               </h3>
               <p className="text-[10px] text-indigo-200 font-mono mt-0.5">
-                {isFa ? 'نسخه فعلی: v4.15.0' : 'Current Version: v4.15.0'}
+                {isFa ? `نسخه فعلی: v${APP_VERSION}` : `Current Version: v${APP_VERSION}`}
               </p>
             </div>
           </div>
