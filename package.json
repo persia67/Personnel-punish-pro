@@ -1,6 +1,6 @@
 {
   "name": "ai-studio-applet",
-  "version": "4.15.20",
+  "version": "4.15.21",
   "private": true,
   "scripts": {
     "dev": "vite",
