@@ -218,7 +218,15 @@ jobs:
         run: |
           set -e
 
-          # Remove generated/instrumented JARs, including the failing jars-9 entry.
+          # Ensure gradle-wrapper.jar exists and is a valid archive
+          mkdir -p android/gradle/wrapper
+          if [ ! -f "android/gradle/wrapper/gradle-wrapper.jar" ] || ! unzip -t android/gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
+            echo "Downloading and restoring valid gradle-wrapper.jar (Gradle 8.7)..."
+            curl -sSL "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" -o android/gradle/wrapper/gradle-wrapper.jar || \
+            curl -sSL "https://repo1.maven.org/maven2/org/gradle/gradle-wrapper/8.7/gradle-wrapper-8.7.jar" -o android/gradle/wrapper/gradle-wrapper.jar
+          fi
+
+          # Remove generated/instrumented JARs, including any failing jars-* entry
           rm -rf ~/.gradle/caches/jars-* || true
           rm -rf ~/.gradle/caches/transforms-* || true
           rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle || true
