@@ -34,7 +34,8 @@ import {
   getClientShortcutDownloadUrl,
   getLocalDeploymentMode,
   setLocalDeploymentMode,
-  getServerUrl
+  getServerUrl,
+  safeParseJson
 } from '../services/syncService';
 
 interface DatacenterModalProps {
@@ -101,22 +102,31 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
     setTestResult({ testing: true });
     try {
       const start = Date.now();
-      const res = await fetch('/api/health');
+      const base = getServerUrl();
+      const targetUrl = base ? `${base}/api/health` : '/api/health';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(targetUrl, {
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       const latency = Date.now() - start;
-      if (res.ok) {
-        const json = await res.json();
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok) {
+        const json = parsed.data;
         setTestResult({
           testing: false,
           success: true,
           message: isFa 
-            ? `پورت ۳۰۰۰ باز و فعال است! زمان پاسخ: ${latency} میلی‌ثانیه (وضعیت: ${json.status})` 
-            : `Port 3000 is open and healthy! Latency: ${latency}ms (Status: ${json.status})`
+            ? `پورت ۳۰۰۰ باز و فعال است! زمان پاسخ: ${latency} میلی‌ثانیه (وضعیت: ${json?.status || 'فعال'})` 
+            : `Port 3000 is open and healthy! Latency: ${latency}ms (Status: ${json?.status || 'healthy'})`
         });
       } else {
         setTestResult({
           testing: false,
           success: false,
-          message: isFa ? 'پاسخ نامعتبر از پورت ۳۰۰۰ دریافت شد.' : 'Invalid response from port 3000.'
+          message: parsed.error || (isFa ? 'پاسخ نامعتبر از پورت ۳۰۰۰ دریافت شد.' : 'Invalid response from port 3000.')
         });
       }
     } catch (err: any) {

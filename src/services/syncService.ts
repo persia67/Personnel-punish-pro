@@ -19,8 +19,49 @@ export interface ServerBackupItem {
   note?: string;
 }
 
+export function isDesktopOrNativeApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname || '';
+  const proto = window.location.protocol || '';
+  return (
+    host.includes('tauri') ||
+    proto === 'tauri:' ||
+    proto === 'capacitor:' ||
+    proto === 'file:' ||
+    Boolean((window as any).__TAURI__) ||
+    Boolean((window as any).Capacitor)
+  );
+}
+
+export async function safeParseJson(res: Response): Promise<{ ok: boolean; data: any; error?: string }> {
+  try {
+    const contentType = res.headers.get('content-type') || '';
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      return { ok: false, data: null, error: 'پاسخ خالی از سرور دریافت شد.' };
+    }
+    const trimmed = text.trim();
+    if (trimmed.startsWith('<') || trimmed.includes('<!DOCTYPE') || contentType.includes('text/html')) {
+      return {
+        ok: false,
+        data: null,
+        error: 'آدرس وارد شده به وب‌سرور یا صفحه HTML هدایت می‌شود و سرویس API سرور روی آن فعال نیست. لطفا از اجرای سرور مرکزی و صحت آدرس IP و پورت (3000) اطمینان حاصل فرمایید.'
+      };
+    }
+    const data = JSON.parse(text);
+    return { ok: true, data };
+  } catch (err: any) {
+    return {
+      ok: false,
+      data: null,
+      error: `پاسخ دریافت شده معتبر نیست: ${err?.message || 'خطای تبدیل JSON'}`
+    };
+  }
+}
+
 const STORAGE_KEY_MODE = 'sg_deployment_mode';
-const STORAGE_KEY_SERVER_URL = 'sg_server_url';
+const STORAGE_KEY_SERVER_URL = 'sg_serverUrl';
+const STORAGE_KEY_SERVER_URL_ALT = 'sg_server_url';
 
 export function getLocalDeploymentMode(): DeploymentMode {
   if (typeof window === 'undefined') return 'SERVER';
@@ -43,18 +84,28 @@ export function setLocalDeploymentMode(mode: DeploymentMode): void {
 export function getServerUrl(): string {
   if (typeof window === 'undefined') return '';
   try {
-    const custom = localStorage.getItem(STORAGE_KEY_SERVER_URL);
+    const custom = localStorage.getItem(STORAGE_KEY_SERVER_URL) || localStorage.getItem(STORAGE_KEY_SERVER_URL_ALT);
     if (custom && custom.trim()) {
-      const trimmed = custom.trim().replace(/\/$/, '');
+      let trimmed = custom.trim().replace(/\/$/, '');
+      if (!/^https?:\/\//i.test(trimmed)) {
+        trimmed = 'http://' + trimmed;
+      }
       // If current protocol is https and custom is http (mixed content), only use if same host or explicit
       if (window.location.protocol === 'https:' && trimmed.startsWith('http://') && !trimmed.includes('localhost')) {
         return window.location.origin;
       }
       return trimmed;
     }
+
+    // When running inside Tauri Desktop or Capacitor mobile, window.location.origin is tauri.localhost or capacitor://localhost
+    // Fall back to default localhost:3000 for local central server
+    if (isDesktopOrNativeApp()) {
+      return 'http://localhost:3000';
+    }
+
     return window.location.origin;
   } catch {
-    return '';
+    return isDesktopOrNativeApp() ? 'http://localhost:3000' : '';
   }
 }
 
@@ -75,7 +126,11 @@ export async function fetchCentralData(): Promise<any> {
       console.warn(`[Sync] Central server returned status ${res.status}`);
       return null;
     }
-    return await res.json();
+    const parsed = await safeParseJson(res);
+    if (parsed.ok) {
+      return parsed.data;
+    }
+    return null;
   } catch (err: any) {
     console.warn('[Sync] Central server not reachable, using local storage cache:', err?.message || err);
     return null;
@@ -85,22 +140,21 @@ export async function fetchCentralData(): Promise<any> {
 export async function syncCentralData(data: any): Promise<any> {
   const base = getServerUrl();
   try {
-    const res = await fetch(`${base}/api/db`, {
+    const targetUrl = base ? `${base}/api/db` : '/api/db';
+    const res = await fetch(targetUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) {
-      let errorMsg = res.statusText;
-      try {
-        const errorJson = await res.json();
-        if (errorJson?.error || errorJson?.message) {
-          errorMsg = errorJson.error || errorJson.message;
-        }
-      } catch {}
-      throw new Error(`Failed to sync database: ${errorMsg || `HTTP ${res.status}`}`);
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) {
+      let errorMsg = parsed.error || res.statusText;
+      if (parsed.data && (parsed.data.error || parsed.data.message)) {
+        errorMsg = parsed.data.error || parsed.data.message;
+      }
+      throw new Error(`خطا در همگام‌سازی اطلاعات: ${errorMsg || `HTTP ${res.status}`}`);
     }
-    return res.json();
+    return parsed.data;
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -110,7 +164,8 @@ export function subscribeToLiveEvents(onEvent: (event: LiveDbEvent) => void): ()
   if (typeof window === 'undefined') return () => {};
   try {
     const base = getServerUrl();
-    const eventSource = new EventSource(`${base}/api/events`);
+    const targetUrl = base ? `${base}/api/events` : '/api/events';
+    const eventSource = new EventSource(targetUrl);
 
     eventSource.onmessage = (e) => {
       try {
@@ -137,12 +192,13 @@ export function subscribeToLiveEvents(onEvent: (event: LiveDbEvent) => void): ()
 export async function fetchDatacenterStatus(): Promise<{ success: boolean; data?: DatacenterStatus; message?: string }> {
   try {
     const base = getServerUrl();
-    const res = await fetch(`${base}/api/datacenter/status`);
-    if (!res.ok) {
-      return { success: false, message: `HTTP ${res.status}` };
+    const targetUrl = base ? `${base}/api/datacenter/status` : '/api/datacenter/status';
+    const res = await fetch(targetUrl, { headers: { 'Accept': 'application/json' } });
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) {
+      return { success: false, message: parsed.error || `HTTP ${res.status}` };
     }
-    const data = await res.json();
-    return { success: true, data };
+    return { success: true, data: parsed.data };
   } catch (err: any) {
     return { success: false, message: err.message };
   }
@@ -153,8 +209,15 @@ export async function configureDatacenterMode(
   serverUrl?: string
 ): Promise<{ success: boolean }> {
   setLocalDeploymentMode(mode);
-  if (serverUrl && typeof window !== 'undefined') {
-    localStorage.setItem(STORAGE_KEY_SERVER_URL, serverUrl.trim());
+  if (typeof window !== 'undefined') {
+    if (serverUrl && serverUrl.trim()) {
+      const cleanUrl = serverUrl.trim();
+      localStorage.setItem(STORAGE_KEY_SERVER_URL, cleanUrl);
+      localStorage.setItem(STORAGE_KEY_SERVER_URL_ALT, cleanUrl);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_SERVER_URL);
+      localStorage.removeItem(STORAGE_KEY_SERVER_URL_ALT);
+    }
   }
   return { success: true };
 }
@@ -183,10 +246,11 @@ start http://${serverIp || '127.0.0.1'}:3000
 export async function fetchServerBackups(): Promise<ServerBackupItem[]> {
   try {
     const base = getServerUrl();
-    const res = await fetch(`${base}/api/backups`);
-    if (!res.ok) return [];
-    const json = await res.json();
-    return json.backups || [];
+    const targetUrl = base ? `${base}/api/backups` : '/api/backups';
+    const res = await fetch(targetUrl, { headers: { 'Accept': 'application/json' } });
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) return [];
+    return parsed.data?.backups || [];
   } catch {
     return [];
   }
@@ -195,15 +259,19 @@ export async function fetchServerBackups(): Promise<ServerBackupItem[]> {
 export async function createServerBackup(note?: string): Promise<{ success: boolean; message: string; backup?: any }> {
   try {
     const base = getServerUrl();
-    const res = await fetch(`${base}/api/backups`, {
+    const targetUrl = base ? `${base}/api/backups` : '/api/backups';
+    const res = await fetch(targetUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ note }),
     });
-    const json = await res.json();
-    return json;
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) {
+      return { success: false, message: parsed.error || `خطا در ایجاد پشتیبان (کد ${res.status})` };
+    }
+    return parsed.data;
   } catch (err: any) {
-    return { success: false, message: err.message };
+    return { success: false, message: err?.message || 'خطا در ارتباط با سرور' };
   }
 }
 
@@ -212,32 +280,44 @@ export async function restoreServerBackup(
 ): Promise<{ success: boolean; message: string; restoredState?: any }> {
   try {
     const base = getServerUrl();
-    const res = await fetch(`${base}/api/backups`, {
+    const targetUrl = base ? `${base}/api/backups` : '/api/backups';
+    const res = await fetch(targetUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ action: 'restore', filename }),
     });
-    const json = await res.json();
-    return json;
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) {
+      return { success: false, message: parsed.error || `خطا در بازیابی پشتیبان (کد ${res.status})` };
+    }
+    return parsed.data;
   } catch (err: any) {
-    return { success: false, message: err.message };
+    return { success: false, message: err?.message || 'خطا در ارتباط با سرور' };
   }
 }
 
 export async function deleteServerBackup(filename: string): Promise<{ success: boolean; message: string }> {
   try {
     const base = getServerUrl();
-    const res = await fetch(`${base}/api/backups?filename=${encodeURIComponent(filename)}`, {
+    const targetUrl = base 
+      ? `${base}/api/backups?filename=${encodeURIComponent(filename)}` 
+      : `/api/backups?filename=${encodeURIComponent(filename)}`;
+    const res = await fetch(targetUrl, {
       method: 'DELETE',
+      headers: { 'Accept': 'application/json' }
     });
-    const json = await res.json();
-    return json;
+    const parsed = await safeParseJson(res);
+    if (!res.ok || !parsed.ok) {
+      return { success: false, message: parsed.error || `خطا در حذف فایل پشتیبان (کد ${res.status})` };
+    }
+    return parsed.data;
   } catch (err: any) {
-    return { success: false, message: err.message };
+    return { success: false, message: err?.message || 'خطا در ارتباط با سرور' };
   }
 }
 
 export function getServerBackupDownloadUrl(filename: string): string {
   const base = getServerUrl();
-  return `${base}/api/backups/download?filename=${encodeURIComponent(filename)}`;
+  const targetUrl = base ? `${base}/api/backups/download` : '/api/backups/download';
+  return `${targetUrl}?filename=${encodeURIComponent(filename)}`;
 }

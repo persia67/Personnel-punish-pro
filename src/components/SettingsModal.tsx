@@ -16,7 +16,9 @@ import {
   restoreServerBackup, 
   deleteServerBackup, 
   getServerBackupDownloadUrl, 
-  ServerBackupItem 
+  ServerBackupItem,
+  getServerUrl,
+  safeParseJson
 } from '../services/syncService';
 
 interface SettingsModalProps {
@@ -349,9 +351,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     }
     setIsSendingTest(true);
     try {
-      const response = await fetch('/api/sms/send', {
+      const base = getServerUrl();
+      const targetUrl = base ? `${base}/api/sms/send` : '/api/sms/send';
+      const response = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({
           config: smsConfig,
           recipientPhone: testPhone,
@@ -359,13 +363,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           placeholders: { name: 'کاربر تست', date: 'امروز', reason: 'تست سیستم', type: 'WARNING' }
         })
       });
-      const result = await response.json();
+      const parsed = await safeParseJson(response);
       setIsSendingTest(false);
-      if (response.ok && result.success) {
-        alert(settings.language === 'fa' ? `پیامک با موفقیت ارسال شد: ${result.message}` : `SMS sent successfully: ${result.message}`);
+      if (response.ok && parsed.ok && parsed.data?.success) {
+        alert(settings.language === 'fa' ? `پیامک با موفقیت ارسال شد: ${parsed.data.message}` : `SMS sent successfully: ${parsed.data.message}`);
         setSmsLogsState(getSmsLogs());
       } else {
-        alert(settings.language === 'fa' ? `خطا در ارسال پیامک: ${result.message}` : `Error sending SMS: ${result.message}`);
+        const errorMsg = parsed.error || parsed.data?.message || 'خطا در ارسال پیامک';
+        alert(settings.language === 'fa' ? `خطا در ارسال پیامک: ${errorMsg}` : `Error sending SMS: ${errorMsg}`);
         setSmsLogsState(getSmsLogs());
       }
     } catch (e: any) {
@@ -405,7 +410,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const getNormalizedActiveUrl = (): string => {
     const normalized = normalizeUrl(serverUrl);
-    return normalized || (window.location.hostname ? window.location.origin : 'http://localhost:3000');
+    if (normalized) return normalized;
+    return getServerUrl() || 'http://localhost:3000';
   };
 
   const isCloudPreview = typeof window !== 'undefined' && 
@@ -444,12 +450,10 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       });
       clearTimeout(timeoutId);
 
-      const contentType = res.headers.get('content-type') || '';
-      const isJson = contentType.includes('application/json');
-
-      if (res.ok && isJson) {
-        const data = await res.json().catch(() => null);
-        if (data && (data.status === 'healthy' || data.status === 'ok' || data.version)) {
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok) {
+        const data = parsed.data;
+        if (data && (data.status === 'healthy' || data.status === 'ok' || data.version || data.status)) {
           setConnectionStatus('success');
           return;
         }
@@ -465,9 +469,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     if (normalized) {
       setServerUrl(normalized);
       localStorage.setItem('sg_serverUrl', normalized);
+      localStorage.setItem('sg_server_url', normalized);
     } else {
       setServerUrl('');
       localStorage.removeItem('sg_serverUrl');
+      localStorage.removeItem('sg_server_url');
     }
     alert(settings.language === 'fa' 
       ? 'آدرس اتصال به سرور شبکه ثبت شد. در صورت در دسترس بودن سرور، همگام‌سازی انجام می‌گیرد.' 

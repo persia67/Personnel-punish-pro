@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Server, Laptop, RefreshCw, CheckCircle2, AlertTriangle, Play, Terminal, Layers, Copy, Check, ShieldCheck, HardDrive } from 'lucide-react';
 import { APP_VERSION } from '../constants';
+import { getServerUrl, safeParseJson } from '../services/syncService';
 
 interface PostgresArchitectureModalProps {
   isOpen: boolean;
@@ -23,10 +24,12 @@ export function PostgresArchitectureModal({ isOpen, onClose }: PostgresArchitect
   const fetchStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/database/status');
-      const data = await res.json();
-      if (data.success) {
-        setDbStatus(data.status);
+      const base = getServerUrl();
+      const targetUrl = base ? `${base}/api/database/status` : '/api/database/status';
+      const res = await fetch(targetUrl, { headers: { 'Accept': 'application/json' } });
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok && parsed.data?.success) {
+        setDbStatus(parsed.data.status);
       }
     } catch (err) {
       console.error('Failed to fetch DB status:', err);
@@ -46,15 +49,21 @@ export function PostgresArchitectureModal({ isOpen, onClose }: PostgresArchitect
     setLoading(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/database/configure', {
+      const base = getServerUrl();
+      const targetUrl = base ? `${base}/api/database/configure` : '/api/database/configure';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ connectionUrl: testUrl }),
       });
-      const data = await res.json();
-      setTestResult(data);
-      if (data.success) {
-        fetchStatus();
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok) {
+        setTestResult(parsed.data);
+        if (parsed.data?.success) {
+          fetchStatus();
+        }
+      } else {
+        setTestResult({ success: false, message: parsed.error || `خطا (${res.status})` });
       }
     } catch (err: any) {
       setTestResult({ success: false, message: err.message || 'خطا در برقراری ارتباط' });
@@ -69,16 +78,18 @@ export function PostgresArchitectureModal({ isOpen, onClose }: PostgresArchitect
     setSqlLoading(true);
     setSqlResult(null);
     try {
-      const res = await fetch('/api/database/query', {
+      const base = getServerUrl();
+      const targetUrl = base ? `${base}/api/database/query` : '/api/database/query';
+      const res = await fetch(targetUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ sql: q }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setSqlResult({ rowCount: data.rowCount, rows: data.rows });
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok && parsed.data?.success) {
+        setSqlResult({ rowCount: parsed.data.rowCount, rows: parsed.data.rows });
       } else {
-        setSqlResult({ error: data.message });
+        setSqlResult({ error: parsed.error || parsed.data?.message || 'خطا در اجرای کوئری' });
       }
     } catch (err: any) {
       setSqlResult({ error: err.message || 'خطا در ارسال کوئری' });

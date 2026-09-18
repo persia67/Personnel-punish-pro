@@ -24,7 +24,8 @@ import {
   getFirewallScriptDownloadUrl, 
   getClientShortcutDownloadUrl,
   setLocalDeploymentMode,
-  getLocalDeploymentMode
+  getLocalDeploymentMode,
+  safeParseJson
 } from '../services/syncService';
 
 interface InitialSetupWizardProps {
@@ -84,8 +85,16 @@ export const InitialSetupWizard: React.FC<InitialSetupWizardProps> = ({
         target = 'http://' + target;
       }
       const testEndpoint = target.endsWith('/') ? `${target}api/health` : `${target}/api/health`;
-      const res = await fetch(testEndpoint);
-      if (res.ok) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(testEndpoint, {
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      const parsed = await safeParseJson(res);
+      if (res.ok && parsed.ok) {
         setClientTestResult({
           success: true,
           message: isFa ? 'اتصال موفقیت‌آمیز بود! سرور مرکزی پاسخ داد.' : 'Connected successfully to central server!'
@@ -93,7 +102,7 @@ export const InitialSetupWizard: React.FC<InitialSetupWizardProps> = ({
       } else {
         setClientTestResult({
           success: false,
-          message: isFa ? `سرور پاسخ داد اما با وضعیت ${res.status}` : `Server returned status ${res.status}`
+          message: parsed.error || (isFa ? `سرور پاسخ داد اما با وضعیت ${res.status}` : `Server returned status ${res.status}`)
         });
       }
     } catch (err: any) {
