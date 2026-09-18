@@ -212,7 +212,7 @@ jobs:
 
       - name: Sync Capacitor Android
         run: |
-          npx cap sync android || true
+          npx cap sync android
 
       - name: Clean Gradle Caches & Compile Signed APK
         run: |

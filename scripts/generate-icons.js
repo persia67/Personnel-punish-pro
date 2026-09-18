@@ -118,6 +118,45 @@ function resizePNG(srcPngBuf, targetSize) {
   return PNG.sync.write(dst);
 }
 
+// Generates a freshly encoded, valid non-interlaced rectangular PNG splash screen
+function createSplashPNG(srcPngBuf, width, height, bgColor = { r: 15, g: 23, b: 42, a: 255 }) {
+  const src = PNG.sync.read(srcPngBuf);
+  const dst = new PNG({ width, height });
+
+  // 1. Fill solid background (dark navy #0F172A matching SafeWatch theme)
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * 4;
+    dst.data[idx] = bgColor.r;
+    dst.data[idx + 1] = bgColor.g;
+    dst.data[idx + 2] = bgColor.b;
+    dst.data[idx + 3] = bgColor.a;
+  }
+
+  // 2. Center the application logo
+  const iconDim = Math.min(Math.floor(Math.min(width, height) * 0.45), 512);
+  const offsetX = Math.floor((width - iconDim) / 2);
+  const offsetY = Math.floor((height - iconDim) / 2);
+
+  for (let y = 0; y < iconDim; y++) {
+    for (let x = 0; x < iconDim; x++) {
+      const srcX = Math.floor(x * src.width / iconDim);
+      const srcY = Math.floor(y * src.height / iconDim);
+      const srcIdx = (srcY * src.width + srcX) * 4;
+      const dstIdx = ((offsetY + y) * width + (offsetX + x)) * 4;
+
+      const alpha = src.data[srcIdx + 3] / 255;
+      if (alpha > 0) {
+        dst.data[dstIdx] = Math.round(src.data[srcIdx] * alpha + dst.data[dstIdx] * (1 - alpha));
+        dst.data[dstIdx + 1] = Math.round(src.data[srcIdx + 1] * alpha + dst.data[dstIdx + 1] * (1 - alpha));
+        dst.data[dstIdx + 2] = Math.round(src.data[srcIdx + 2] * alpha + dst.data[dstIdx + 2] * (1 - alpha));
+        dst.data[dstIdx + 3] = 255;
+      }
+    }
+  }
+
+  return PNG.sync.write(dst);
+}
+
 // Generates multi-resolution .ico with standard DIB headers
 function generateIco(masterPngBuf, outputIcoPath) {
   const sizes = [16, 24, 32, 48, 64, 128, 256];
@@ -214,11 +253,34 @@ function runIconPipeline() {
     }
   });
 
-  // 3. Generate Windows DIB icon.ico (avoids RC2176 error in RC.EXE)
+  // 3. Generate Android splash screens (valid non-interlaced PNGs)
+  const androidSplashes = [
+    { dir: 'drawable', w: 480, h: 800 },
+    { dir: 'drawable-port-mdpi', w: 320, h: 480 },
+    { dir: 'drawable-port-hdpi', w: 480, h: 800 },
+    { dir: 'drawable-port-xhdpi', w: 720, h: 1280 },
+    { dir: 'drawable-port-xxhdpi', w: 960, h: 1600 },
+    { dir: 'drawable-port-xxxhdpi', w: 1280, h: 1920 },
+    { dir: 'drawable-land-mdpi', w: 480, h: 320 },
+    { dir: 'drawable-land-hdpi', w: 800, h: 480 },
+    { dir: 'drawable-land-xhdpi', w: 1280, h: 720 },
+    { dir: 'drawable-land-xxhdpi', w: 1600, h: 960 },
+    { dir: 'drawable-land-xxxhdpi', w: 1920, h: 1280 }
+  ];
+
+  androidSplashes.forEach(s => {
+    const splashBuf = createSplashPNG(masterPngBuf, s.w, s.h);
+    const targetDir = path.join(__dirname, `../android/app/src/main/res/${s.dir}`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    const targetFile = path.join(targetDir, 'splash.png');
+    fs.writeFileSync(targetFile, splashBuf);
+  });
+
+  // 4. Generate Windows DIB icon.ico (avoids RC2176 error in RC.EXE)
   const icoPath = path.join(tauriIconsDir, 'icon.ico');
   generateIco(masterPngBuf, icoPath);
 
-  // 4. Sync icons to public and src asset directories
+  // 5. Sync icons to public and src asset directories
   const publicDir = path.join(__dirname, '../public');
   fs.mkdirSync(publicDir, { recursive: true });
 
