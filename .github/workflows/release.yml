@@ -180,7 +180,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -190,9 +189,11 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: false
 
       - name: Install NPM Dependencies
-        run: npm ci || npm install
+        run: npm install --no-audit --no-fund
 
       - name: Build Web Distribution
         run: |
@@ -212,8 +213,13 @@ jobs:
         run: |
           npx cap sync android || true
 
-      - name: Verify Gradle Wrapper & Compile Signed APK
+      - name: Clean Corrupted Gradle Cache & Compile Signed APK
         run: |
+          # Purge any corrupt cached jars (such as bcprov-jdk18on or broken downloads)
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle 2>/dev/null || true
+          rm -rf ~/.gradle/caches/transforms-* 2>/dev/null || true
+          rm -f ~/.gradle/caches/modules-2/modules-2.lock 2>/dev/null || true
+
           # Verify or repair gradle-wrapper.jar
           if [ ! -f "android/gradle/wrapper/gradle-wrapper.jar" ] || ! unzip -t android/gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
             echo "Downloading healthy gradle-wrapper.jar..."
@@ -223,7 +229,14 @@ jobs:
 
           chmod +x android/gradlew
           cd android
-          ./gradlew assembleRelease || ./gradlew assembleDebug
+          
+          # Attempt build with --no-daemon, and fallback with fresh cache if corrupted
+          ./gradlew assembleRelease --no-daemon || {
+            echo "First build attempt failed, cleaning transforms and retrying with refresh-dependencies..."
+            rm -rf ~/.gradle/caches/modules-2/files-2.1/*bcprov* 2>/dev/null || true
+            rm -rf ~/.gradle/caches/transforms-* 2>/dev/null || true
+            ./gradlew assembleRelease --no-daemon --refresh-dependencies || ./gradlew assembleDebug --no-daemon --refresh-dependencies
+          }
           cd ..
 
           RAW_APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
@@ -300,13 +313,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install NPM Dependencies
-        run: npm ci || npm install
+        run: npm install --no-audit --no-fund
 
       - name: Build Web Distribution
         shell: bash
@@ -384,11 +396,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
 
       - name: Install Dependencies & Build
         run: |
-          npm ci || npm install
+          npm install --no-audit --no-fund
           if [ -f "scripts/generate-icons.js" ]; then
             node scripts/generate-icons.js
           fi
