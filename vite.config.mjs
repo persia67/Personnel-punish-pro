@@ -7,7 +7,42 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'api-server-middleware',
+      configureServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (url.startsWith('/api')) {
+            try {
+              const { default: apiApp } = await server.ssrLoadModule('/server/src/index.ts');
+              return apiApp(req, res, next);
+            } catch (err) {
+              console.error('[API Middleware Error]:', err);
+              return next(err);
+            }
+          }
+          next();
+        });
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(async (req, res, next) => {
+          const url = req.url || '';
+          if (url.startsWith('/api')) {
+            try {
+              const { default: apiApp } = await import('./server/src/index.ts');
+              return apiApp(req, res, next);
+            } catch (err) {
+              console.error('[Preview API Middleware Error]:', err);
+              return next(err);
+            }
+          }
+          next();
+        });
+      }
+    }
+  ],
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {
@@ -21,8 +56,6 @@ export default defineConfig({
     include: ['react', 'react-dom', 'lucide-react', 'framer-motion', 'recharts']
   },
   server: {
-    port: 3000,
-    host: '0.0.0.0',
     watch: {
       ignored: ['**/android/**', '**/release/**', '**/src-tauri/**', '**/dist/**']
     }

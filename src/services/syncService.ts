@@ -55,26 +55,48 @@ export function getServerUrl(): string {
 
 export async function fetchCentralData(): Promise<any> {
   const base = getServerUrl();
-  const res = await fetch(`${base}/api/db`, {
-    headers: { 'Accept': 'application/json' },
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch database: ${res.statusText}`);
+  try {
+    const res = await fetch(`${base}/api/db`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) {
+      let errorMsg = res.statusText;
+      try {
+        const errorJson = await res.json();
+        if (errorJson?.error || errorJson?.message || errorJson?.details) {
+          errorMsg = errorJson.error || errorJson.message || errorJson.details;
+        }
+      } catch {}
+      throw new Error(`Failed to fetch database: ${errorMsg || `HTTP ${res.status}`}`);
+    }
+    return res.json();
+  } catch (err: any) {
+    throw new Error(err.message || 'Failed to fetch database');
   }
-  return res.json();
 }
 
 export async function syncCentralData(data: any): Promise<any> {
   const base = getServerUrl();
-  const res = await fetch(`${base}/api/db`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to sync database: ${res.statusText}`);
+  try {
+    const res = await fetch(`${base}/api/db`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      let errorMsg = res.statusText;
+      try {
+        const errorJson = await res.json();
+        if (errorJson?.error || errorJson?.message) {
+          errorMsg = errorJson.error || errorJson.message;
+        }
+      } catch {}
+      throw new Error(`Failed to sync database: ${errorMsg || `HTTP ${res.status}`}`);
+    }
+    return res.json();
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
-  return res.json();
 }
 
 export function subscribeToLiveEvents(onEvent: (event: LiveDbEvent) => void): () => void {

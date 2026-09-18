@@ -301,7 +301,7 @@ app.get('/api/datacenter/status', async (req: Request, res: Response) => {
 
 export default app;
 
-if (process.env.NODE_ENV !== 'test' && !process.env.NEXT_RUNTIME) {
+if (process.env.NODE_ENV !== 'test' && !process.env.NEXT_RUNTIME && process.env.RUN_STANDALONE === 'true') {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[SafeWatch HSE Server] Running on http://0.0.0.0:${PORT} with PostgreSQL`);
   });
