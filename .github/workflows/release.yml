@@ -190,7 +190,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          cache-read-only: false
+          cache-disabled: true
 
       - name: Install NPM Dependencies
         run: npm install --no-audit --no-fund
@@ -213,12 +213,11 @@ jobs:
         run: |
           npx cap sync android || true
 
-      - name: Clean Corrupted Gradle Cache & Compile Signed APK
+      - name: Clean Environment & Compile Signed APK
         run: |
-          # Purge any corrupt cached jars (such as bcprov-jdk18on or broken downloads)
-          rm -rf ~/.gradle/caches/modules-2/files-2.1/org.bouncycastle 2>/dev/null || true
-          rm -rf ~/.gradle/caches/transforms-* 2>/dev/null || true
-          rm -f ~/.gradle/caches/modules-2/modules-2.lock 2>/dev/null || true
+          # Completely purge any legacy or corrupted Gradle cache directory
+          rm -rf ~/.gradle/caches 2>/dev/null || true
+          rm -rf ~/.gradle/daemon 2>/dev/null || true
 
           # Verify or repair gradle-wrapper.jar
           if [ ! -f "android/gradle/wrapper/gradle-wrapper.jar" ] || ! unzip -t android/gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
@@ -230,13 +229,9 @@ jobs:
           chmod +x android/gradlew
           cd android
           
-          # Attempt build with --no-daemon, and fallback with fresh cache if corrupted
-          ./gradlew assembleRelease --no-daemon || {
-            echo "First build attempt failed, cleaning transforms and retrying with refresh-dependencies..."
-            rm -rf ~/.gradle/caches/modules-2/files-2.1/*bcprov* 2>/dev/null || true
-            rm -rf ~/.gradle/caches/transforms-* 2>/dev/null || true
-            ./gradlew assembleRelease --no-daemon --refresh-dependencies || ./gradlew assembleDebug --no-daemon --refresh-dependencies
-          }
+          # Clean build outputs and run assemble
+          ./gradlew clean --no-daemon || true
+          ./gradlew assembleRelease --no-daemon --stacktrace || ./gradlew assembleDebug --no-daemon --stacktrace
           cd ..
 
           RAW_APK=$(find android/app/build/outputs/apk -name "*.apk" | head -n 1)
