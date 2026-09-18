@@ -447,9 +447,10 @@ jobs:
       - name: View Published Release Details
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           TAG="${{ needs.prepare-version.outputs.tag_name }}"
           echo "=========================================================="
           echo "Successfully published all multi-platform installers for: $TAG"
           echo "=========================================================="
-          gh release view "$TAG"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"
