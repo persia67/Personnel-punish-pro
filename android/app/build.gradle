@@ -7,8 +7,8 @@ android {
         applicationId "com.hsesafewatch.admin"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 41510
-        versionName "4.15.10"
+        versionCode 41511
+        versionName "4.15.11"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
