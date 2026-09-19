@@ -62,7 +62,7 @@ app.get('/api/health', (req: Request, res: Response) => {
     status: 'healthy',
     name: 'SafeWatch HSE Dedicated Server',
     database: 'PostgreSQL',
-    version: '4.15.0',
+    version: '4.15.23',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });

@@ -62,6 +62,7 @@ export async function safeParseJson(res: Response): Promise<{ ok: boolean; data:
 const STORAGE_KEY_MODE = 'sg_deployment_mode';
 const STORAGE_KEY_SERVER_URL = 'sg_serverUrl';
 const STORAGE_KEY_SERVER_URL_ALT = 'sg_server_url';
+export const STORAGE_KEY_SERVER_LAN_IP = 'sg_server_lan_ip';
 
 export function getLocalDeploymentMode(): DeploymentMode {
   if (typeof window === 'undefined') return 'SERVER';
@@ -81,6 +82,73 @@ export function setLocalDeploymentMode(mode: DeploymentMode): void {
   } catch {}
 }
 
+export function getServerLanIp(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return localStorage.getItem(STORAGE_KEY_SERVER_LAN_IP) || '';
+  } catch {
+    return '';
+  }
+}
+
+export function setServerLanIp(ip: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleanIp = (ip || '').trim().replace(/^https?:\/\//i, '').split(':')[0].replace(/\/.*$/, '');
+    if (cleanIp) {
+      localStorage.setItem(STORAGE_KEY_SERVER_LAN_IP, cleanIp);
+      const fullUrl = `http://${cleanIp}:3000`;
+      localStorage.setItem(STORAGE_KEY_SERVER_URL, fullUrl);
+      localStorage.setItem(STORAGE_KEY_SERVER_URL_ALT, fullUrl);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_SERVER_LAN_IP);
+    }
+  } catch {}
+}
+
+/**
+ * Detect local IPv4 addresses (such as 10.1.1.17) in client runtime using WebRTC
+ */
+export async function detectLocalIpsWebRTC(): Promise<string[]> {
+  if (typeof window === 'undefined' || !(window as any).RTCPeerConnection) {
+    return [];
+  }
+  return new Promise((resolve) => {
+    const ips = new Set<string>();
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      pc.createDataChannel('');
+      pc.onicecandidate = (event) => {
+        if (!event || !event.candidate) {
+          pc.close();
+          resolve(Array.from(ips));
+          return;
+        }
+        const cand = event.candidate.candidate;
+        // Match private IPv4: 10.x.x.x, 192.168.x.x, 172.16-31.x.x
+        const matches = cand.match(/\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b/g);
+        if (matches) {
+          matches.forEach(ip => ips.add(ip));
+        }
+      };
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .catch(() => {
+          pc.close();
+          resolve(Array.from(ips));
+        });
+
+      // Timeout after 1.5 seconds if ICE gathering takes too long
+      setTimeout(() => {
+        try { pc.close(); } catch {}
+        resolve(Array.from(ips));
+      }, 1500);
+    } catch {
+      resolve([]);
+    }
+  });
+}
+
 export function getServerUrl(): string {
   if (typeof window === 'undefined') return '';
   try {
@@ -90,11 +158,12 @@ export function getServerUrl(): string {
       if (!/^https?:\/\//i.test(trimmed)) {
         trimmed = 'http://' + trimmed;
       }
-      // If current protocol is https and custom is http (mixed content), only use if same host or explicit
-      if (window.location.protocol === 'https:' && trimmed.startsWith('http://') && !trimmed.includes('localhost')) {
-        return window.location.origin;
-      }
       return trimmed;
+    }
+
+    const savedLanIp = getServerLanIp();
+    if (savedLanIp) {
+      return `http://${savedLanIp}:3000`;
     }
 
     // When running inside Tauri Desktop or Capacitor mobile, window.location.origin is tauri.localhost or capacitor://localhost
@@ -222,25 +291,155 @@ export async function configureDatacenterMode(
   return { success: true };
 }
 
-export function getFirewallScriptDownloadUrl(): string {
+export function getFirewallScriptDownloadUrl(osType: 'windows' | 'linux' = 'windows'): string {
+  if (osType === 'linux') {
+    const linuxScript = `#!/usr/bin/env bash
+echo "==================================================="
+echo "[SafeWatch HSE] Opening Port 3000 in Linux Firewall"
+echo "==================================================="
+if command -v ufw >/dev/null 2>&1; then
+    sudo ufw allow 3000/tcp comment 'SafeWatch HSE Server Port 3000'
+    echo "[OK] UFW rule applied for port 3000."
+fi
+if command -v firewall-cmd >/dev/null 2>&1; then
+    sudo firewall-cmd --permanent --add-port=3000/tcp
+    sudo firewall-cmd --reload
+    echo "[OK] Firewalld rule applied for port 3000."
+fi
+if command -v iptables >/dev/null 2>&1; then
+    sudo iptables -A INPUT -p tcp --dport 3000 -j ACCEPT
+    echo "[OK] iptables rule added for port 3000."
+fi
+echo "Port 3000 is open."
+`;
+    return `data:text/plain;charset=utf-8,${encodeURIComponent(linuxScript)}`;
+  }
+
   const scriptContent = `@echo off
+title SafeWatch HSE - Firewall Configuration
+color 0A
+chcp 65001 >nul
 echo ===================================================
 echo [SafeWatch HSE] Opening Port 3000 in Windows Firewall
 echo ===================================================
+echo.
 netsh advfirewall firewall add rule name="SafeWatch HSE Server Port 3000" dir=in action=allow protocol=TCP localport=3000
-echo Port 3000 is now accessible for workstations across LAN.
+if %errorlevel% equ 0 (
+    echo [OK] Port 3000 is now open and accessible for all workstations.
+) else (
+    echo [!] Note: Please right-click and 'Run as administrator' to apply firewall rules.
+)
+echo.
 pause
 `;
   return `data:text/plain;charset=utf-8,${encodeURIComponent(scriptContent)}`;
 }
 
-export function getClientShortcutDownloadUrl(serverIp: string): string {
+export function getServerLauncherScriptDownloadUrl(port: number = 3000): string {
+  const scriptContent = `@echo off
+title SafeWatch HSE - Central Server Console
+color 0A
+chcp 65001 >nul
+
+echo ====================================================================
+echo        SafeWatch HSE Enterprise Central Server (v4.15.22)
+echo ====================================================================
+echo.
+
+where node >nul 2>nul
+if %errorlevel% neq 0 (
+    color 0C
+    echo [ERROR] Node.js is not found in system PATH!
+    echo To run the central server, please install Node.js from: https://nodejs.org
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [*] Ensuring Windows Firewall Port ${port} is open...
+netsh advfirewall firewall show rule name="SafeWatch HSE Server Port ${port}" >nul 2>nul
+if %errorlevel% neq 0 (
+    netsh advfirewall firewall add rule name="SafeWatch HSE Server Port ${port}" dir=in action=allow protocol=TCP localport=${port} >nul 2>nul
+)
+
+set PORT=${port}
+set HOST=0.0.0.0
+set RUN_STANDALONE=true
+
+echo [*] Starting Central Server on 0.0.0.0:${port}...
+echo [*] Local Host:    http://localhost:${port}
+echo [*] Workstation:   http://%COMPUTERNAME%:${port}
+echo.
+
+if exist "server\\dist\\index.mjs" (
+    node scripts\\start-server.js
+) else if exist "scripts\\start-server.js" (
+    node scripts\\start-server.js
+) else (
+    node server\\dist\\index.mjs
+)
+
+pause
+`;
+  return `data:text/plain;charset=utf-8,${encodeURIComponent(scriptContent)}`;
+}
+
+export function getClientShortcutDownloadUrl(serverIp: string, port: number = 3000): string {
+  const cleanIp = (serverIp || '10.1.1.17').trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split(':')[0] || '10.1.1.17';
+  const targetUrl = `http://${cleanIp}:${port}`;
+
   const shortcutContent = `@echo off
-title SafeWatch HSE Workstation
-echo Connecting to SafeWatch Central Server at http://${serverIp || '127.0.0.1'}:3000...
-start http://${serverIp || '127.0.0.1'}:3000
+title SafeWatch HSE Workstation Connection
+color 0B
+chcp 65001 >nul
+
+echo ====================================================================
+echo         SafeWatch HSE Workstation Setup
+echo ====================================================================
+echo Connecting to Central Server at ${targetUrl}...
+echo.
+
+:: Create Desktop Shortcut via PowerShell
+set "TARGET_URL=${targetUrl}"
+set "SHORTCUT_PATH=%USERPROFILE%\\Desktop\\SafeWatch HSE.url"
+
+echo [InternetShortcut] > "%SHORTCUT_PATH%"
+echo URL=%TARGET_URL% >> "%SHORTCUT_PATH%"
+echo IconIndex=0 >> "%SHORTCUT_PATH%"
+
+echo [✓] Desktop shortcut created: "%USERPROFILE%\\Desktop\\SafeWatch HSE"
+echo [✓] Launching browser to ${targetUrl}...
+start "" "%TARGET_URL%"
 `;
   return `data:text/plain;charset=utf-8,${encodeURIComponent(shortcutContent)}`;
+}
+
+export async function testServerPing(targetUrl: string): Promise<{ success: boolean; latencyMs: number; data?: any; error?: string }> {
+  const start = performance.now();
+  try {
+    let clean = (targetUrl || '').trim();
+    if (!clean) return { success: false, latencyMs: 0, error: 'آدرس سرور خالی است.' };
+    if (!/^https?:\/\//i.test(clean)) {
+      clean = 'http://' + clean;
+    }
+    const endpoint = clean.endsWith('/') ? `${clean}api/health` : `${clean}/api/health`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(endpoint, {
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const latencyMs = Math.round(performance.now() - start);
+    const parsed = await safeParseJson(res);
+    if (res.ok && parsed.ok) {
+      return { success: true, latencyMs, data: parsed.data };
+    }
+    return { success: false, latencyMs, error: parsed.error || `کد خطا: ${res.status}` };
+  } catch (err: any) {
+    const latencyMs = Math.round(performance.now() - start);
+    return { success: false, latencyMs, error: err?.message || 'عدم دسترسی به سرور' };
+  }
 }
 
 export async function fetchServerBackups(): Promise<ServerBackupItem[]> {

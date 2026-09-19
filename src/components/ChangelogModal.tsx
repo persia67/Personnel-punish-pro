@@ -54,11 +54,11 @@ const ChangelogModal: React.FC<ChangelogModalProps> = ({ isOpen, onClose, settin
             <div className="text-xs text-emerald-900 leading-relaxed font-medium">
               {isFa ? (
                 <p>
-                  در نسخه <strong>v4.14.0</strong>، معماری مرکز داده (Datacenter) با قابلیت تفکیک نسخه‌های سرور مرکزی و کلاینت‌ها پیاده‌سازی شد، ابزار خودکار باز کردن پورت ۳۰۰۰ در فایروال افزوده گردید و ویزارد هوشمند راه‌اندازی اولیه طراحی شد.
+                  در نسخه <strong>v{APP_VERSION}</strong>، کنسول جامع مرکز داده (Datacenter) با قابلیت اتصال مستقیم به IP سازمانی، تست زنده پینگ و پورت ۳۰۰۰، ابزار خودکار فایروال و ایجاد شورتکات‌های دسکتاپ کلاینت ارتقا یافت.
                 </p>
               ) : (
                 <p>
-                  In version <strong>v4.14.0</strong>, a dedicated Datacenter architecture with Server/Client node separation was implemented, accompanied by automated Firewall Port 3000 opening tools and an interactive setup wizard.
+                  In version <strong>v{APP_VERSION}</strong>, the Datacenter Console was enhanced with dedicated LAN IP configuration, live Port 3000 health pings, automated firewall utilities, and one-click workstation shortcut creators.
                 </p>
               )}
             </div>

@@ -32,9 +32,14 @@ import {
   configureDatacenterMode, 
   getFirewallScriptDownloadUrl, 
   getClientShortcutDownloadUrl,
+  getServerLauncherScriptDownloadUrl,
   getLocalDeploymentMode,
   setLocalDeploymentMode,
   getServerUrl,
+  getServerLanIp,
+  setServerLanIp,
+  detectLocalIpsWebRTC,
+  testServerPing,
   safeParseJson
 } from '../services/syncService';
 
@@ -54,9 +59,13 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'firewall' | 'clients' | 'modes'>('overview');
   const [status, setStatus] = useState<DatacenterStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedIp, setSelectedIp] = useState<string>('');
+  const [selectedIp, setSelectedIp] = useState<string>(() => getServerLanIp() || '10.1.1.17');
+  const [manualIpInput, setManualIpInput] = useState<string>(() => getServerLanIp() || '10.1.1.17');
+  const [detectedLocalIps, setDetectedLocalIps] = useState<string[]>([]);
+  const [isServerActive, setIsServerActive] = useState<boolean | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ testing: boolean; success?: boolean; message?: string } | null>(null);
+  const [pingResult, setPingResult] = useState<{ testing: boolean; success?: boolean; latency?: number; message?: string } | null>(null);
   
   // Mode Change state
   const [currentLocalMode, setCurrentLocalMode] = useState<DeploymentMode>(getLocalDeploymentMode());
@@ -64,18 +73,31 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
   const [savingMode, setSavingMode] = useState(false);
   const [modeSuccessMsg, setModeSuccessMsg] = useState<string | null>(null);
 
+  const checkServerOnline = async (urlToCheck?: string) => {
+    const target = urlToCheck || getServerUrl() || 'http://localhost:3000';
+    const ping = await testServerPing(target);
+    setIsServerActive(ping.success);
+    return ping;
+  };
+
   const loadStatus = async () => {
     setIsLoading(true);
     try {
+      checkServerOnline();
       const res = await fetchDatacenterStatus();
       if (res.success && res.data) {
         setStatus(res.data);
-        if (!selectedIp && res.data.primaryIp) {
+        setIsServerActive(true);
+        const saved = getServerLanIp();
+        if (!saved && res.data.primaryIp && res.data.primaryIp !== '127.0.0.1') {
           setSelectedIp(res.data.primaryIp);
+          setManualIpInput(res.data.primaryIp);
         }
+      } else {
+        setIsServerActive(false);
       }
     } catch {
-      // ignore
+      setIsServerActive(false);
     } finally {
       setIsLoading(false);
     }
@@ -86,6 +108,17 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
       loadStatus();
       setCurrentLocalMode(getLocalDeploymentMode());
       setClientServerInput(localStorage.getItem('sg_serverUrl') || '');
+      detectLocalIpsWebRTC().then((ips) => {
+        if (ips && ips.length > 0) {
+          setDetectedLocalIps(ips);
+          const saved = getServerLanIp();
+          if (!saved && (ips.includes('10.1.1.17') || ips[0])) {
+            const preferred = ips.includes('10.1.1.17') ? '10.1.1.17' : ips[0];
+            setSelectedIp(preferred);
+            setManualIpInput(preferred);
+          }
+        }
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -96,6 +129,33 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleApplyIp = (ipToApply: string) => {
+    const clean = ipToApply.trim().replace(/^https?:\/\//i, '').split(':')[0].replace(/\/.*$/, '');
+    if (clean) {
+      setSelectedIp(clean);
+      setManualIpInput(clean);
+      setServerLanIp(clean);
+      checkServerOnline(`http://${clean}:3000`);
+    }
+  };
+
+  const handleTestIpPing = async (ipToTest: string) => {
+    setPingResult({ testing: true });
+    const clean = ipToTest.trim().replace(/^https?:\/\//i, '').split(':')[0].replace(/\/.*$/, '') || '10.1.1.17';
+    const res = await testServerPing(`http://${clean}:3000`);
+    setPingResult({
+      testing: false,
+      success: res.success,
+      latency: res.latencyMs,
+      message: res.success 
+        ? (isFa ? `اتصال موفق! پورت ۳۰۰۰ پاسخ داد (${res.latencyMs} میلی‌ثانیه)` : `Connected! Port 3000 responded in ${res.latencyMs}ms`)
+        : (isFa ? `پورت ۳۰۰۰ روی آدرس ${clean} در دسترس نیست (${res.error || 'عدم دسترسی'}). سرور را با فایل Start-SafeWatch-Server.bat اجرا فرمایید.` : `Port 3000 is not reachable on ${clean}.`)
+    });
+    if (res.success) {
+      setIsServerActive(true);
+    }
   };
 
   const handleTestPort = async () => {
@@ -115,6 +175,7 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
       const parsed = await safeParseJson(res);
       if (res.ok && parsed.ok) {
         const json = parsed.data;
+        setIsServerActive(true);
         setTestResult({
           testing: false,
           success: true,
@@ -123,17 +184,19 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
             : `Port 3000 is open and healthy! Latency: ${latency}ms (Status: ${json?.status || 'healthy'})`
         });
       } else {
+        setIsServerActive(false);
         setTestResult({
           testing: false,
           success: false,
-          message: parsed.error || (isFa ? 'پاسخ نامعتبر از پورت ۳۰۰۰ دریافت شد.' : 'Invalid response from port 3000.')
+          message: parsed.error || (isFa ? 'پاسخ نامعتبر از پورت ۳۰۰۰ دریافت شد. لطفاً سرور را اجرا فرمایید.' : 'Invalid response from port 3000.')
         });
       }
     } catch (err: any) {
+      setIsServerActive(false);
       setTestResult({
         testing: false,
         success: false,
-        message: isFa ? `خطا در برقراری ارتباط با پورت ۳۰۰۰: ${err.message}` : `Connection failed: ${err.message}`
+        message: isFa ? `پورت ۳۰۰۰ در حال حاضر پاسخگو نیست: ${err.message}` : `Connection failed: ${err.message}`
       });
     }
   };
@@ -166,9 +229,21 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
     }
   };
 
-  const activeIp = selectedIp || status?.primaryIp || '127.0.0.1';
+  const activeIp = selectedIp || manualIpInput || status?.primaryIp || '10.1.1.17';
   const port = status?.port || 3000;
   const fullServerUrl = `http://${activeIp}:${port}`;
+
+  // Aggregate all unique detected/known IPs
+  const candidateIps = new Set<string>();
+  candidateIps.add('10.1.1.17');
+  if (getServerLanIp()) candidateIps.add(getServerLanIp());
+  if (status?.primaryIp && status.primaryIp !== '127.0.0.1') candidateIps.add(status.primaryIp);
+  (status?.networkInterfaces || []).forEach(n => {
+    if (!n.internal && n.address) candidateIps.add(n.address);
+  });
+  detectedLocalIps.forEach(ip => candidateIps.add(ip));
+  candidateIps.add('127.0.0.1');
+  const allSuggestedIps = Array.from(candidateIps);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in" dir={isFa ? 'rtl' : 'ltr'}>
@@ -185,8 +260,21 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                 <h2 className="text-base sm:text-lg font-black tracking-tight">
                   {isFa ? 'مرکز داده و مدیریت استقرار شبکه (Datacenter Console)' : 'Datacenter & Network Deployment Console'}
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  {isFa ? 'پورت ۳۰۰۰ فعال' : 'Port 3000 Active'}
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider border flex items-center gap-1.5 ${
+                  isServerActive
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : isServerActive === false
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                    : 'bg-slate-500/20 text-slate-300 border-slate-500/30'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    isServerActive ? 'bg-emerald-400 animate-pulse' : isServerActive === false ? 'bg-amber-400' : 'bg-slate-400'
+                  }`} />
+                  {isServerActive 
+                    ? (isFa ? 'پورت ۳۰۰۰ فعال و آنلاین' : 'Port 3000 Active') 
+                    : isServerActive === false
+                    ? (isFa ? 'سرور متوقف است (پورت ۳۰۰۰ آفلاین)' : 'Server Offline (Port 3000)')
+                    : (isFa ? 'پورت ۳۰۰۰' : 'Port 3000')}
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
@@ -432,9 +520,49 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                       );
                     })
                   ) : (
-                    <div className="p-4 text-center text-xs text-slate-500 col-span-2">
-                      {isFa ? 'در حال پایش کارت‌های شبکه...' : 'Scanning network interfaces...'}
-                    </div>
+                    allSuggestedIps.map((ip, idx) => {
+                      const isTarget = ip === activeIp || ip === '10.1.1.17';
+                      return (
+                        <div 
+                          key={idx}
+                          className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
+                            isTarget
+                              ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700'
+                              : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`w-2 h-2 rounded-full ${ip === '127.0.0.1' ? 'bg-slate-400' : 'bg-emerald-500'}`} />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-slate-900 dark:text-white">
+                                  {ip}
+                                </span>
+                                {ip === '10.1.1.17' && (
+                                  <span className="text-[9px] px-1.5 py-0.5 bg-indigo-600 text-white rounded font-bold">
+                                    {isFa ? 'سرور شبکه کارخانه' : 'Plant Server'}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                                {ip === '10.1.1.17' ? (isFa ? 'آی‌پی اصلی سازمان' : 'Enterprise LAN') : ip === '127.0.0.1' ? (isFa ? 'رایانه محلی (لوکال)' : 'Local Loopback') : (isFa ? 'شناسایی شده' : 'Detected')}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => copyToClipboard(`http://${ip}:${port}`, `ip-sug-${idx}`)}
+                              className="px-2 py-1 text-[11px] rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors flex items-center gap-1 text-slate-700 dark:text-slate-200 cursor-pointer"
+                              title={isFa ? 'کپی آدرس کامل' : 'Copy Full URL'}
+                            >
+                              {copiedKey === `ip-sug-${idx}` ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                              <span className="font-mono text-[10px]">{port}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -653,39 +781,126 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                 </div>
               </div>
 
-              {/* Target IP Selector */}
-              <div className="p-4 rounded-2xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-3">
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                  {isFa ? 'آدرس IP سرور مرکزی جهت ایجاد شورتکات و لینک کلاینت:' : 'Select Server IP for Client Links:'}
-                </label>
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  <select
-                    value={selectedIp}
-                    onChange={(e) => setSelectedIp(e.target.value)}
-                    className="p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold flex-1"
+              {/* Offline Warning & Server Launcher Card */}
+              {isServerActive === false && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                      <AlertCircle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-amber-900 dark:text-amber-200">
+                        {isFa ? 'سرویس سرور مرکزی روی پورت ۳۰۰۰ متوقف است' : 'Central Server service on Port 3000 is stopped'}
+                      </h4>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300/80">
+                        {isFa 
+                          ? 'پورت ۳۰۰۰ باز است، اما فرآیند پردازشی سرور هنوز راه‌اندازی نشده است. فایل راه‌انداز زیر را روی سرور اجرا کنید.' 
+                          : 'Port 3000 is open, but the server background process is not running. Launch the server script below.'}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={getServerLauncherScriptDownloadUrl(port)}
+                    download="Start-SafeWatch-Server.bat"
+                    className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-xs shrink-0"
                   >
-                    {status?.networkInterfaces && status.networkInterfaces.map((iface, i) => (
-                      <option key={i} value={iface.address}>
-                        {iface.address} - {iface.name} {iface.address === status.primaryIp ? '(پیش‌فرض سازمانی)' : ''}
-                      </option>
-                    ))}
-                    <option value="localhost">localhost (فقط همین رایانه)</option>
-                  </select>
+                    <Download className="w-4 h-4" />
+                    {isFa ? 'دانلود راه‌انداز سرور ویندوز (.bat)' : 'Download Server Launcher (.bat)'}
+                  </a>
+                </div>
+              )}
+
+              {/* Target IP Configuration & Custom Override */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-800 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                    <Network className="w-4 h-4 text-indigo-500" />
+                    {isFa ? 'آدرس IP سرور مرکزی در شبکه کارخانه (LAN IP):' : 'Central Server LAN IP Address:'}
+                  </label>
+                  <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
+                    {isFa ? 'آی‌پی سرور اصلی: 10.1.1.17' : 'Primary Server IP: 10.1.1.17'}
+                  </span>
+                </div>
+
+                {/* Input + Action Buttons */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={manualIpInput}
+                      onChange={(e) => setManualIpInput(e.target.value)}
+                      placeholder="10.1.1.17"
+                      className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                      dir="ltr"
+                    />
+                  </div>
 
                   <button
-                    onClick={() => copyToClipboard(fullServerUrl, 'full-url')}
+                    onClick={() => handleApplyIp(manualIpInput)}
                     className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
                   >
-                    {copiedKey === 'full-url' ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
-                    {isFa ? 'کپی لینک اتصال کلاینت' : 'Copy Client URL'}
+                    <Check className="w-4 h-4" />
+                    {isFa ? 'ذخیره و ثبت آی‌پی' : 'Save & Set IP'}
+                  </button>
+
+                  <button
+                    onClick={() => handleTestIpPing(manualIpInput)}
+                    disabled={pingResult?.testing}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${pingResult?.testing ? 'animate-spin' : ''}`} />
+                    {isFa ? 'تست اتصال زنده (Ping)' : 'Test Ping'}
                   </button>
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-xs text-slate-500 font-bold">{isFa ? 'آدرس نهایی اتصال:' : 'Full Target URL:'}</span>
-                  <span className="font-mono text-xs font-black text-indigo-600 dark:text-indigo-400">
-                    {fullServerUrl}
-                  </span>
+                {/* Quick IP Suggestion Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] text-slate-500 font-bold">{isFa ? 'انتخاب سریع آی‌پی:' : 'Quick Select:'}</span>
+                  {allSuggestedIps.map((ip) => {
+                    const isSelected = activeIp === ip;
+                    return (
+                      <button
+                        key={ip}
+                        onClick={() => handleApplyIp(ip)}
+                        className={`px-2.5 py-1 text-[11px] font-mono font-bold rounded-lg border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                        }`}
+                      >
+                        {ip} {ip === '10.1.1.17' ? (isFa ? '★ سازمانی' : '★ LAN') : ip === '127.0.0.1' ? (isFa ? '(لوکال)' : '(local)') : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Live Ping Feedback */}
+                {pingResult && (
+                  <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                    pingResult.success 
+                      ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                  }`}>
+                    {pingResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" /> : <AlertCircle className="w-4 h-4 shrink-0 text-amber-500" />}
+                    <span>{pingResult.message}</span>
+                  </div>
+                )}
+
+                {/* Full Target URL Display */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <span className="text-xs text-slate-500 font-bold">{isFa ? 'آدرس نهایی اتصال کلاینت‌ها:' : 'Client Connection URL:'}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-black text-indigo-600 dark:text-indigo-400 select-all">
+                      {fullServerUrl}
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(fullServerUrl, 'full-url')}
+                      className="p-1.5 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 text-slate-700 dark:text-slate-200 cursor-pointer"
+                      title={isFa ? 'کپی آدرس' : 'Copy'}
+                    >
+                      {copiedKey === 'full-url' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -697,22 +912,31 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                   </div>
                   <div>
                     <h4 className="text-xs font-black text-slate-900 dark:text-white">
-                      {isFa ? 'دانلود اسکریپت ساخت شورتکات دسکتاپ (.bat)' : 'Download Desktop Shortcut Creator (.bat)'}
+                      {isFa ? 'دانلود اسکریپت‌های راه‌اندازی و اتصال (.bat)' : 'Download Setup & Shortcut Scripts (.bat)'}
                     </h4>
                     <p className="text-[11px] text-slate-500">
-                      {isFa ? 'این فایل را روی هر رایانه دیگر در کارخانه اجرا کنید تا شورتکات اتصال به این سرور روی دسکتاپ قرار گیرد.' : 'Run on any workstation to create desktop shortcut linked directly to this server.'}
+                      {isFa ? 'اسکریپت شورتکات را روی سیستم کلاینت‌ها، و اسکریپت راه‌انداز سرور را روی رایانه سرور اجرا نمایید.' : 'Run shortcut installer on workstations, or server launcher on the host server.'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
                   <a
-                    href={getClientShortcutDownloadUrl(activeIp)}
+                    href={getClientShortcutDownloadUrl(activeIp, port)}
                     download="Create-SafeWatch-Shortcut.bat"
-                    className="py-2.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-xs"
+                    className="py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-xs"
                   >
                     <Download className="w-4 h-4" />
-                    {isFa ? 'دانلود اسکریپت ساخت خودکار شورتکات' : 'Download Shortcut Installer (.bat)'}
+                    {isFa ? 'دانلود شورتکات کلاینت (.bat)' : 'Download Workstation Shortcut (.bat)'}
+                  </a>
+
+                  <a
+                    href={getServerLauncherScriptDownloadUrl(port)}
+                    download="Start-SafeWatch-Server.bat"
+                    className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-xs"
+                  >
+                    <Server className="w-4 h-4" />
+                    {isFa ? 'دانلود راه‌انداز سرور (.bat)' : 'Download Server Launcher (.bat)'}
                   </a>
 
                   <a
@@ -722,7 +946,7 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                     className="py-2.5 px-4 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 font-bold text-xs flex items-center justify-center gap-2 transition-all text-slate-700 dark:text-slate-200"
                   >
                     <ExternalLink className="w-4 h-4" />
-                    {isFa ? 'تست باز کردن در تب جدید' : 'Open in New Tab'}
+                    {isFa ? 'باز کردن در مرورگر' : 'Open in Browser'}
                   </a>
                 </div>
               </div>

@@ -12,6 +12,7 @@ export default defineConfig({
     {
       name: 'api-server-middleware',
       configureServer(server) {
+        process.env.VITE_DEV_SERVER = 'true';
         server.middlewares.use(async (req, res, next) => {
           const url = req.url || '';
           if (url.startsWith('/api')) {
@@ -27,6 +28,7 @@ export default defineConfig({
         });
       },
       configurePreviewServer(server) {
+        process.env.VITE_DEV_SERVER = 'true';
         server.middlewares.use(async (req, res, next) => {
           const url = req.url || '';
           if (url.startsWith('/api')) {
