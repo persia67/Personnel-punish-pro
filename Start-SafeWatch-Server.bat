@@ -1,55 +1,74 @@
 @echo off
-title SafeWatch HSE - Enterprise Intranet Web Server Console
+@setlocal EnableDelayedExpansion
+title SafeWatch HSE - Enterprise Central Server Console
 color 0A
-chcp 65001 >nul
+chcp 65001 >nul 2>&1
 
 echo ====================================================================
-echo        SafeWatch HSE Enterprise Intranet Web Server (v4.15.23)
-echo       سرور وب یکپارچه سامانه جامع ایمنی و بهداشت کارخانه
+echo        SafeWatch HSE Enterprise Central Server (v4.16.0)
+echo    Central Intranet Server for Safety ^& Health Department
 echo ====================================================================
 echo.
 
-:: 1. Verify Node.js is installed
-where node >nul 2>nul
+REM 1. Auto-discover Node.js from standard installation paths if not in PATH
+where node >nul 2>&1
+if %errorlevel% neq 0 (
+    if exist "%ProgramFiles%\nodejs\node.exe" (
+        set "PATH=%ProgramFiles%\nodejs;!PATH!"
+    ) else if exist "%ProgramFiles(x86)%\nodejs\node.exe" (
+        set "PATH=%ProgramFiles(x86)%\nodejs;!PATH!"
+    ) else if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+        set "PATH=%LOCALAPPDATA%\Programs\nodejs;!PATH!"
+    ) else if exist "%APPDATA%\npm" (
+        set "PATH=%APPDATA%\npm;!PATH!"
+    )
+)
+
+where node >nul 2>&1
 if %errorlevel% neq 0 (
     color 0C
-    echo [ERROR] Node.js is not found in your system PATH!
+    echo [ERROR] Node.js is not found on this system.
     echo.
-    echo To run the central server, please install Node.js (LTS version)
-    echo from: https://nodejs.org
+    echo Please install Node.js (LTS recommended) from:
+    echo https://nodejs.org
+    echo.
+    echo After installation, run this file again.
     echo.
     pause
     exit /b 1
 )
 
-:: 2. Set Port (default: 3000)
-set SERVER_PORT=3000
-if not "%~1"=="" set SERVER_PORT=%~1
+REM 2. Determine target port (Default: 3000)
+set "SERVER_PORT=3000"
+if not "%~1"=="" set "SERVER_PORT=%~1"
 
-:: 3. Auto-configure Windows Firewall for specified Port
-echo [*] Checking Windows Firewall rule for Port %SERVER_PORT%...
-netsh advfirewall firewall show rule name="SafeWatch HSE Server Port %SERVER_PORT%" >nul 2>nul
+REM 3. Safely apply Windows Firewall rule
+echo [*] Checking Windows Firewall rule for Port !SERVER_PORT!...
+netsh advfirewall firewall show rule name="SafeWatch HSE Server Port !SERVER_PORT!" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [*] Opening Port %SERVER_PORT% in Windows Firewall...
-    netsh advfirewall firewall add rule name="SafeWatch HSE Server Port %SERVER_PORT%" dir=in action=allow protocol=TCP localport=%SERVER_PORT% >nul 2>nul
-    if %errorlevel% equ 0 (
-        echo [OK] Windows Firewall Port %SERVER_PORT% opened successfully.
+    netsh advfirewall firewall add rule name="SafeWatch HSE Server Port !SERVER_PORT!" dir=in action=allow protocol=TCP localport=!SERVER_PORT! >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [OK] Port !SERVER_PORT! opened in Windows Firewall.
     ) else (
-        echo [!] Note: To configure the firewall rule automatically, run this script as Administrator.
+        echo [!] Note: To configure firewall automatically, run as Administrator.
     )
 ) else (
-    echo [OK] Firewall rule for Port %SERVER_PORT% is active.
+    echo [OK] Firewall rule for Port !SERVER_PORT! is active.
 )
 
-:: 4. Set environment variables
-set PORT=%SERVER_PORT%
-set HOST=0.0.0.0
-set RUN_STANDALONE=true
+REM 4. Set environment and launch
+set "PORT=!SERVER_PORT!"
+set "HOST=0.0.0.0"
+set "RUN_STANDALONE=true"
 
 echo.
-echo [*] Launching Intranet Web Server on Port %SERVER_PORT%...
+echo [*] Starting Central Server on Port !SERVER_PORT!...
 echo.
 
-node scripts\start-server.js %SERVER_PORT%
+node scripts\start-server.js !SERVER_PORT!
 
-pause
+if %errorlevel% neq 0 (
+    echo.
+    echo [!] Server process exited with code %errorlevel%
+    pause
+)
