@@ -1,10 +1,11 @@
 @echo off
-title SafeWatch HSE - Central Server Console
+title SafeWatch HSE - Enterprise Intranet Web Server Console
 color 0A
 chcp 65001 >nul
 
 echo ====================================================================
-echo        SafeWatch HSE Enterprise Central Server (v4.15.22)
+echo        SafeWatch HSE Enterprise Intranet Web Server (v4.15.23)
+echo       سرور وب یکپارچه سامانه جامع ایمنی و بهداشت کارخانه
 echo ====================================================================
 echo.
 
@@ -21,36 +22,34 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: 2. Auto-configure Windows Firewall for Port 3000
-echo [*] Checking Windows Firewall rule for Port 3000...
-netsh advfirewall firewall show rule name="SafeWatch HSE Server Port 3000" >nul 2>nul
+:: 2. Set Port (default: 3000)
+set SERVER_PORT=3000
+if not "%~1"=="" set SERVER_PORT=%~1
+
+:: 3. Auto-configure Windows Firewall for specified Port
+echo [*] Checking Windows Firewall rule for Port %SERVER_PORT%...
+netsh advfirewall firewall show rule name="SafeWatch HSE Server Port %SERVER_PORT%" >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [*] Opening Port 3000 in Windows Firewall...
-    netsh advfirewall firewall add rule name="SafeWatch HSE Server Port 3000" dir=in action=allow protocol=TCP localport=3000 >nul 2>nul
+    echo [*] Opening Port %SERVER_PORT% in Windows Firewall...
+    netsh advfirewall firewall add rule name="SafeWatch HSE Server Port %SERVER_PORT%" dir=in action=allow protocol=TCP localport=%SERVER_PORT% >nul 2>nul
     if %errorlevel% equ 0 (
-        echo [OK] Windows Firewall Port 3000 opened successfully.
+        echo [OK] Windows Firewall Port %SERVER_PORT% opened successfully.
     ) else (
         echo [!] Note: To configure the firewall rule automatically, run this script as Administrator.
     )
 ) else (
-    echo [OK] Firewall rule for Port 3000 is active.
+    echo [OK] Firewall rule for Port %SERVER_PORT% is active.
 )
 
-:: 3. Set environment variables
-set PORT=3000
+:: 4. Set environment variables
+set PORT=%SERVER_PORT%
 set HOST=0.0.0.0
 set RUN_STANDALONE=true
 
 echo.
-echo [*] Launching Central Server on Port 3000...
+echo [*] Launching Intranet Web Server on Port %SERVER_PORT%...
 echo.
 
-if exist "server\dist\index.mjs" (
-    node scripts\start-server.js
-) else if exist "scripts\start-server.js" (
-    node scripts\start-server.js
-) else (
-    node server\dist\index.mjs
-)
+node scripts\start-server.js %SERVER_PORT%
 
 pause

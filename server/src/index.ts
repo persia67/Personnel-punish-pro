@@ -299,10 +299,54 @@ app.get('/api/datacenter/status', async (req: Request, res: Response) => {
   }
 });
 
+// -------------------------------------------------------------
+// Serve Static Web Application (Intranet Website Mode)
+// -------------------------------------------------------------
+if (!process.env.VITE_DEV_SERVER) {
+  const DIST_DIR = path.join(process.cwd(), 'dist');
+  if (fs.existsSync(DIST_DIR)) {
+    app.use(express.static(DIST_DIR, { index: false }));
+  }
+
+  // Fallback SPA routing for web clients (e.g. http://10.1.1.63:3000)
+  app.get(/.*/, (req: Request, res: Response, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    const indexPath = path.join(DIST_DIR, 'index.html');
+    if (fs.existsSync(indexPath)) {
+      return res.sendFile(indexPath);
+    }
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="fa" dir="rtl">
+      <head>
+        <meta charset="utf-8">
+        <title>SafeWatch HSE Intranet Server</title>
+        <style>
+          body { font-family: system-ui, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+          .card { background: #1e293b; padding: 2rem; border-radius: 1rem; border: 1px solid #334155; max-width: 500px; text-align: center; }
+          h1 { color: #38bdf8; font-size: 1.5rem; margin-top: 0; }
+          p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; }
+          code { background: #0f172a; padding: 0.2rem 0.5rem; border-radius: 0.3rem; color: #a5b4fc; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>سرور وب یکپارچه SafeWatch HSE</h1>
+          <p>سرور مرکزی در حال اجرا است، اما فایل‌های رابط وب (dist) هنوز کامپایل نشده‌اند.</p>
+          <p>لطفاً یک‌بار در ترمینال دستور <code>npm run build</code> را اجرا نمایید تا وب‌سایت کامپایل و آماده سرویس‌دهی شود.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+}
+
 export default app;
 
 if (process.env.NODE_ENV !== 'test' && !process.env.NEXT_RUNTIME && process.env.RUN_STANDALONE === 'true') {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[SafeWatch HSE Server] Running on http://0.0.0.0:${PORT} with PostgreSQL`);
+    console.log(`[SafeWatch HSE Intranet Web Server] Running on http://0.0.0.0:${PORT}`);
   });
 }

@@ -9,13 +9,30 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
-const PORT = process.env.PORT || '3000';
+// Allow custom port from argv or env (default: 3000)
+const argPort = process.argv.find(arg => /^\d+$/.test(arg));
+const PORT = argPort || process.env.PORT || '3000';
 process.env.PORT = PORT;
 process.env.RUN_STANDALONE = 'true';
 
+const distDir = path.join(rootDir, 'dist');
 const serverDist = path.join(rootDir, 'server', 'dist', 'index.mjs');
 
-// Build server bundle if missing
+// 1. Build frontend bundle if missing
+if (!fs.existsSync(distDir) || !fs.existsSync(path.join(distDir, 'index.html'))) {
+  console.log('[SafeWatch Server] Frontend dist is missing. Building web assets with Vite...');
+  try {
+    execSync('npx vite build', {
+      cwd: rootDir,
+      stdio: 'inherit',
+    });
+    console.log('[SafeWatch Server] Frontend build completed successfully.');
+  } catch (err) {
+    console.error('[SafeWatch Server] Warning: Frontend build failed:', err.message);
+  }
+}
+
+// 2. Build server bundle if missing
 if (!fs.existsSync(serverDist)) {
   console.log('[SafeWatch Server] Building server bundle with Vite SSR...');
   try {
@@ -24,11 +41,11 @@ if (!fs.existsSync(serverDist)) {
       stdio: 'inherit',
     });
   } catch (err) {
-    console.error('[SafeWatch Server] Build failed, attempting to run with node strip-types:', err.message);
+    console.error('[SafeWatch Server] Server build failed, attempting to run with node:', err.message);
   }
 }
 
-// Print banner and IP detection
+// 3. Print banner and IP detection
 const interfaces = os.networkInterfaces();
 const ipv4List = [];
 
@@ -42,25 +59,29 @@ for (const [name, addrs] of Object.entries(interfaces)) {
 }
 
 console.log(`\n=============================================================`);
-console.log(`   SafeWatch HSE Enterprise Central Server`);
+console.log(`   SafeWatch HSE Enterprise Intranet Web Server`);
+console.log(`   سرور وب یکپارچه واحد ایمنی و بهداشت در شبکه داخلی`);
 console.log(`=============================================================`);
-console.log(` [✓] Target Port:      ${PORT}`);
-console.log(` [✓] Host Binding:     0.0.0.0 (All Network Interfaces)`);
-console.log(` [✓] Local Host:       http://localhost:${PORT}`);
+console.log(` [✓] پورت فعال سرور (Port):   ${PORT}`);
+console.log(` [✓] میزبان (Host Binding):  0.0.0.0 (تمام کارت‌های شبکه)`);
+console.log(` [✓] دسترسی محلی (Local):    http://localhost:${PORT}`);
 
 const nonInternal = ipv4List.filter(ip => !ip.internal);
 if (nonInternal.length > 0) {
-  console.log(` [✓] Available LAN Addresses for Workstations:`);
+  console.log(` [✓] آدرس‌های اتصال سایر سیستم‌ها در شبکه کارخانه (LAN Workstations):`);
   nonInternal.forEach(ip => {
-    console.log(`     -> http://${ip.address}:${PORT} (${ip.name})`);
+    console.log(`     -> http://${ip.address}:${PORT}  (${ip.name})`);
   });
 } else {
-  console.log(` [✓] LAN Workstation:  http://127.0.0.1:${PORT}`);
+  console.log(` [✓] آدرس شبکه محلی:        http://127.0.0.1:${PORT}`);
 }
 
+console.log(`-------------------------------------------------------------`);
+console.log(` [ℹ] همکاران در سایر سیستم‌ها با وارد کردن آدرس بالا در مرورگر`);
+console.log(`     می‌توانند بدون نیاز به نصب، وارد سامانه شوند.`);
 console.log(`=============================================================\n`);
 
-// Run the server bundle
+// 4. Run the server bundle
 const serverProcess = spawn('node', [serverDist], {
   cwd: rootDir,
   stdio: 'inherit',
@@ -86,3 +107,4 @@ process.on('SIGTERM', () => {
   serverProcess.kill('SIGTERM');
   process.exit(0);
 });
+

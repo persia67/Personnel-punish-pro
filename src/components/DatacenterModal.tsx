@@ -229,12 +229,13 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
     }
   };
 
-  const activeIp = selectedIp || manualIpInput || status?.primaryIp || '10.1.1.17';
+  const activeIp = selectedIp || manualIpInput || getServerLanIp() || status?.primaryIp || '10.1.1.63';
   const port = status?.port || 3000;
   const fullServerUrl = `http://${activeIp}:${port}`;
 
   // Aggregate all unique detected/known IPs
   const candidateIps = new Set<string>();
+  candidateIps.add('10.1.1.63');
   candidateIps.add('10.1.1.17');
   if (getServerLanIp()) candidateIps.add(getServerLanIp());
   if (status?.primaryIp && status.primaryIp !== '127.0.0.1') candidateIps.add(status.primaryIp);
@@ -817,8 +818,8 @@ export const DatacenterModal: React.FC<DatacenterModalProps> = ({
                     <Network className="w-4 h-4 text-indigo-500" />
                     {isFa ? 'آدرس IP سرور مرکزی در شبکه کارخانه (LAN IP):' : 'Central Server LAN IP Address:'}
                   </label>
-                  <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold">
-                    {isFa ? 'آی‌پی سرور اصلی: 10.1.1.17' : 'Primary Server IP: 10.1.1.17'}
+                  <span className="text-[11px] text-indigo-600 dark:text-indigo-400 font-bold font-mono">
+                    {isFa ? `آی‌پی انتخابی سرور: ${activeIp}` : `Active Server IP: ${activeIp}`}
                   </span>
                 </div>
 
